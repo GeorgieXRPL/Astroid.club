@@ -30,64 +30,104 @@ export default function HomePage() {
 function Hero() {
   return (
     <section className="relative min-h-screen w-full overflow-hidden flex flex-col">
-      {/* Three.js starfield behind everything */}
+      {/*
+        Three.js starfield behind everything. Z-0; receives all pointer
+        events (drag to rotate, scroll to zoom, auto-rotate when idle).
+        Every overlay above this layer that isn't itself interactive
+        sets pointer-events-none so the user can grab the universe
+        through the headline.
+      */}
       <div className="absolute inset-0 z-0">
         <HeroSceneClient />
       </div>
 
-      {/* Soft inner vignette so text always wins against the bloom */}
+      {/*
+        Subtle top + bottom legibility fades. Linear, not radial - a
+        radial gradient frames the canvas (visible dark vignette at
+        the corners); linear fades just darken the strips behind the
+        fixed top bar and bottom status row so text stays readable.
+      */}
       <div
         aria-hidden
-        className="absolute inset-0 z-[1] pointer-events-none"
+        className="absolute inset-x-0 top-0 z-[1] h-40 pointer-events-none"
         style={{
           background:
-            'radial-gradient(ellipse at center, transparent 0%, rgba(0,8,20,0.55) 70%, rgba(0,8,20,0.85) 100%)',
+            'linear-gradient(to bottom, rgba(0,8,20,0.65) 0%, rgba(0,8,20,0) 100%)',
+        }}
+      />
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 z-[1] h-44 pointer-events-none"
+        style={{
+          background:
+            'linear-gradient(to top, rgba(0,8,20,0.75) 0%, rgba(0,8,20,0) 100%)',
         }}
       />
 
-      {/* Top bar: wordmark + holders chip */}
-      <header className="relative z-10 flex items-center justify-between px-5 sm:px-8 pt-6 sm:pt-8">
+      {/* Top bar: wordmark + holders chip. The bar itself accepts pointer
+          events (links/chip are clickable), but the whitespace between
+          them does not so a drag started there reaches the canvas. */}
+      <header className="relative z-10 flex items-center justify-between px-5 sm:px-8 pt-6 sm:pt-8 pointer-events-none">
         <Link
           href="/"
           aria-label="Astroid Club home"
-          className="flex items-center gap-2.5 group"
+          className="flex items-center gap-2.5 group pointer-events-auto"
         >
           <Logo />
           <span className="font-display text-base sm:text-lg tracking-tight text-white">
             astroid<span className="text-cosmos">.</span>club
           </span>
         </Link>
-        <span className="holder-chip">Holders only</span>
+        <span className="holder-chip pointer-events-auto">Holders only</span>
       </header>
 
-      {/* Center stage */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-5 sm:px-8 py-12">
+      {/* Center stage. pointer-events-none on the whole stack so the user
+          can click-and-drag through the headline to manipulate the scene. */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-5 sm:px-8 py-12 pointer-events-none">
         <div className="eyebrow mb-6 sm:mb-8 opacity-90">
           {branding.eyebrow}
         </div>
 
-        <h1 className="font-display text-6xl sm:text-7xl lg:text-8xl xl:text-9xl font-bold tracking-tight text-white leading-[0.95] mb-5 sm:mb-7 warm-glow">
+        <h1
+          className="font-display text-6xl sm:text-7xl lg:text-8xl xl:text-9xl font-bold tracking-tight text-white leading-[0.95] mb-5 sm:mb-7"
+          style={{
+            textShadow:
+              '0 2px 24px rgba(0,8,20,0.7), 0 0 48px rgba(0,212,255,0.18)',
+          }}
+        >
           {branding.headline}
         </h1>
 
-        <p className="font-display text-xl sm:text-2xl lg:text-3xl text-white/65 tracking-tight max-w-2xl">
+        <p
+          className="font-display text-xl sm:text-2xl lg:text-3xl text-white/70 tracking-tight max-w-2xl"
+          style={{ textShadow: '0 2px 16px rgba(0,8,20,0.7)' }}
+        >
           {branding.subhead}
         </p>
 
-        <div className="mt-12 sm:mt-16 text-xs sm:text-sm font-mono text-white/45 tracking-[0.32em] uppercase">
+        <div className="mt-12 sm:mt-16 text-xs sm:text-sm font-mono text-white/55 tracking-[0.32em] uppercase">
           {branding.teaseLine}
         </div>
       </div>
 
-      {/* Bottom strip - status + small "stay close" line */}
-      <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-3 px-5 sm:px-8 pb-6 sm:pb-8 text-xs font-mono text-white/45 tracking-[0.18em] uppercase">
+      {/* Bottom strip - status + small "stay close" line. Same pattern:
+          parent is pointer-events-none; only the actual text spans pick
+          up clicks (they have no clicks anyway, so the entire bottom is
+          dragable through). */}
+      <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-3 px-5 sm:px-8 pb-6 sm:pb-8 text-xs font-mono text-white/55 tracking-[0.18em] uppercase pointer-events-none">
         <span className="flex items-center gap-2.5">
           <span className="live-dot" aria-hidden />
           {branding.status} · v0.1
         </span>
-        <span className="text-white/55 normal-case tracking-normal font-sans text-sm">
+        <span className="text-white/65 normal-case tracking-normal font-sans text-sm">
           {branding.callsign}
         </span>
+      </div>
+
+      {/* Tiny interaction hint, bottom-right on desktop only. Same trick
+          .space uses on its star map. */}
+      <div className="absolute bottom-3 right-3 sm:right-5 z-10 hidden md:block text-[10px] font-mono text-white/30 tracking-[0.24em] uppercase pointer-events-none select-none">
+        Drag to look around · Scroll to zoom
       </div>
     </section>
   );

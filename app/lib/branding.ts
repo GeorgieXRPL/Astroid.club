@@ -42,7 +42,7 @@ export const branding = {
 
   // Bottom strip
   status: 'Coming soon',
-  callsign: 'Stay close — the doors open here first.',
+  callsign: 'Stay close. The doors open here first.',
 
   // Footer (deliberately minimal - the heavy disclaimers live here)
   footer: {
@@ -54,7 +54,7 @@ export const branding = {
       'Astroid Club is a community surface for the $ASTROID token community. Nothing on this site is an offer, solicitation, or recommendation to buy any token, and nothing here is investment, financial, legal, or tax advice.',
       '$ASTROID is a community token. Holding it is not a security interest, not a share, and does not entitle you to any contractual benefit, profit, or future asset distribution.',
       'This domain (astroid.club) does not represent or speak for any charity. Charity-related disclosures live at astroid.space/charity.',
-      'The Club is in development. Anything we tease here is intent, not a promise — features may change, ship later, or not ship at all.',
+      'The Club is in development. Anything we tease here is intent, not a promise. Features may change, ship later, or not ship at all.',
     ],
     rights: 'All rights reserved.',
   },

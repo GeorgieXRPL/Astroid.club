@@ -16,8 +16,8 @@
  */
 
 import { useRef, useMemo, Suspense } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Stars as DeepStars } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Stars as DeepStars, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import { BlendFunction, KernelSize } from 'postprocessing';
 import * as THREE from 'three';
@@ -138,13 +138,17 @@ interface NebulaCloud {
 }
 
 // Hand-tuned, deliberately few and large. Sit far beyond the star shell.
+// Slightly punchier than .space's defaults so the empty hero has more
+// chromatic depth - this is a coming-soon mood piece, not a star catalog.
 const NEBULAE: ReadonlyArray<NebulaCloud> = [
-  { position: [-60, 6, -90], scale: 110, color: '#3b3a8a', opacity: 0.32 },
-  { position: [70, -10, -85], scale: 130, color: '#7a2a6a', opacity: 0.22 },
-  { position: [10, 22, 95], scale: 100, color: '#1f5d8a', opacity: 0.28 },
-  { position: [-55, -18, 80], scale: 90, color: '#6b3a1f', opacity: 0.18 },
-  { position: [40, -40, -10], scale: 80, color: '#1f3d6b', opacity: 0.22 },
-  { position: [-30, 40, 30], scale: 70, color: '#5a1f6b', opacity: 0.18 },
+  { position: [-60, 6, -90], scale: 130, color: '#3b3a8a', opacity: 0.42 },
+  { position: [70, -10, -85], scale: 150, color: '#7a2a6a', opacity: 0.32 },
+  { position: [10, 22, 95], scale: 120, color: '#1f5d8a', opacity: 0.36 },
+  { position: [-55, -18, 80], scale: 100, color: '#6b3a1f', opacity: 0.22 },
+  { position: [40, -40, -10], scale: 90, color: '#1f3d6b', opacity: 0.28 },
+  { position: [-30, 40, 30], scale: 80, color: '#5a1f6b', opacity: 0.24 },
+  { position: [85, 30, 10], scale: 70, color: '#00d4ff', opacity: 0.14 },
+  { position: [-80, -25, -20], scale: 75, color: '#ff7a45', opacity: 0.12 },
 ];
 
 function NebulaField({ texture }: { texture: THREE.Texture }) {
@@ -250,34 +254,17 @@ function DustField({
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Camera drift (explorer feel)                                               */
-/* -------------------------------------------------------------------------- */
-
-function CameraDrift() {
-  const { camera } = useThree();
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    const r = 6;
-    const speed = 0.06;
-    const x = Math.cos(t * speed) * r;
-    const z = Math.sin(t * speed) * r * 0.6 - 4;
-    const y = Math.sin(t * speed * 0.7) * 1.4;
-    camera.position.set(x, y, z);
-    const look = new THREE.Vector3(
-      Math.cos(t * speed + 0.3) * (r + 2),
-      Math.sin(t * speed * 0.7 + 0.2) * 1.0,
-      Math.sin(t * speed + 0.3) * r * 0.6 - 8
-    );
-    camera.lookAt(look);
-    camera.rotation.z += Math.sin(t * 0.25) * 0.0008;
-  });
-  return null;
-}
-
-/* -------------------------------------------------------------------------- */
 /*  Top-level scene                                                            */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The .space hero uses CameraDrift because it's the home page background -
+ * a static, never-touched mood piece. The Club hero is the entire page,
+ * so we hand the camera to OrbitControls with a slow auto-rotate. When
+ * a visitor grabs the scene, the rotate pauses naturally and they can
+ * fly the camera around. Pan is disabled so the camera never strays
+ * far enough that the scene goes empty.
+ */
 export function StarFieldHero() {
   const textures = useMemo(
     () => ({
@@ -292,65 +279,95 @@ export function StarFieldHero() {
       <Suspense fallback={null}>
         <Canvas
           camera={{ position: [0, 1.5, 14], fov: 72, near: 0.1, far: 400 }}
-          style={{ background: 'transparent' }}
+          style={{ background: 'transparent', display: 'block' }}
           dpr={[1, 2]}
           gl={{
             antialias: true,
             powerPreference: 'high-performance',
             toneMapping: THREE.ACESFilmicToneMapping,
-            toneMappingExposure: 1.2,
+            toneMappingExposure: 1.25,
           }}
         >
-          <ambientLight intensity={0.18} />
+          <ambientLight intensity={0.2} />
 
           <GalacticBand texture={textures.cloud} />
           <NebulaField texture={textures.cloud} />
 
-          {/* Three layers of deep starfield: very far / mid / near, each
-              with different sizes and speeds, so the drift produces parallax. */}
+          {/* Four layers of deep starfield - very far / far / mid / near.
+              Different sizes and speeds give real parallax when the
+              user (or auto-rotate) moves the camera. */}
           <DeepStars
-            radius={300}
-            depth={140}
-            count={14000}
-            factor={2.5}
+            radius={320}
+            depth={160}
+            count={18000}
+            factor={2.2}
             saturation={0.05}
             fade
-            speed={0.15}
+            speed={0.12}
           />
           <DeepStars
-            radius={180}
-            depth={90}
-            count={6000}
-            factor={4}
+            radius={200}
+            depth={100}
+            count={8000}
+            factor={3.5}
             saturation={0.1}
             fade
-            speed={0.3}
+            speed={0.25}
           />
           <DeepStars
-            radius={90}
-            depth={50}
-            count={1800}
-            factor={6}
-            saturation={0.15}
+            radius={110}
+            depth={60}
+            count={2400}
+            factor={5}
+            saturation={0.18}
             fade
-            speed={0.55}
+            speed={0.45}
+          />
+          <DeepStars
+            radius={60}
+            depth={30}
+            count={800}
+            factor={7}
+            saturation={0.22}
+            fade
+            speed={0.7}
           />
 
-          <DustField texture={textures.dust} count={500} />
+          <DustField texture={textures.dust} count={650} />
 
-          <CameraDrift />
+          {/* Interactive controls: drag rotates, scroll zooms, gentle
+              auto-rotate when idle. Pan is locked so the camera can't
+              wander out of the field. Polar limits keep us from flipping
+              upside-down past the galactic plane. */}
+          <OrbitControls
+            enableRotate
+            enableZoom
+            enablePan={false}
+            autoRotate
+            autoRotateSpeed={0.15}
+            rotateSpeed={0.45}
+            zoomSpeed={0.6}
+            minDistance={4}
+            maxDistance={55}
+            minPolarAngle={Math.PI * 0.18}
+            maxPolarAngle={Math.PI * 0.82}
+            makeDefault
+          />
 
           <EffectComposer multisampling={0}>
             <Bloom
-              intensity={1.25}
-              luminanceThreshold={0.16}
-              luminanceSmoothing={0.65}
+              intensity={1.55}
+              luminanceThreshold={0.14}
+              luminanceSmoothing={0.7}
               kernelSize={KernelSize.LARGE}
               mipmapBlur
             />
+            {/* Light vignette only - the page text already sits over a
+                separate CSS gradient for legibility, so we don't need to
+                frame the canvas itself. */}
             <Vignette
-              offset={0.2}
-              darkness={0.78}
+              offset={0.35}
+              darkness={0.45}
               blendFunction={BlendFunction.NORMAL}
             />
           </EffectComposer>
