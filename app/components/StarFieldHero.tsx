@@ -211,34 +211,107 @@ function NebulaField({ texture }: { texture: THREE.Texture }) {
 }
 
 /**
- * Milky-Way-style band: long stretched cloud sprite tilted across the
- * scene. Suggests a galactic plane the camera is moving through.
+ * Milky-Way-style band.
+ *
+ * The naive way to do this is one or two huge sprites stretched 5x along
+ * the band axis. That fails: stretching a square noise texture 5:1
+ * stretches every internal noise feature 5:1 too, so the band reads as
+ * a blocky, streaky rectangle - the exact artifact a "galaxy" should
+ * not have. No amount of mipmaps or anisotropy fixes a sprite that's
+ * already wrong in object space.
+ *
+ * The fix is to build the band from many SMALL, mostly-square puffs
+ * scattered along the axis. Each puff has scale ratio <= 1.6, so the
+ * texture is sampled at near-original aspect and there's no stretch
+ * artifact. Their additive overlap creates an organic, continuous band
+ * with real variation - different colors, different rotations, density
+ * tapering at the edges - that no single sprite can fake.
+ *
+ * Generated once at module load with a seeded PRNG so the shape is
+ * deterministic across reloads (no hot-reload reshuffling).
  */
+interface BandPuff {
+  position: [number, number, number];
+  scale: [number, number, number];
+  color: string;
+  opacity: number;
+  rotation: number;
+}
+
+const BAND_PUFFS: ReadonlyArray<BandPuff> = (() => {
+  let s = 0x12345678;
+  const rnd = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  // Six related hues - mostly cool indigo/violet with a couple of warm
+  // magenta accents. Keeps the band reading as one structure, not a
+  // rainbow blob.
+  const palette = [
+    '#4a3a8a',
+    '#5a3a8a',
+    '#3a4a9a',
+    '#7a3a7a',
+    '#5a4a9a',
+    '#8a4a6a',
+  ];
+
+  const puffs: BandPuff[] = [];
+  const COUNT = 26;
+
+  for (let i = 0; i < COUNT; i++) {
+    // Position along the band axis (-1 to +1), with jitter so the
+    // puffs don't sit in a regular line.
+    const t = (i / (COUNT - 1)) * 2 - 1;
+    const x = t * 115 + (rnd() - 0.5) * 22;
+    // Vertical wander - a sine wave plus jitter gives the band a
+    // natural drift instead of a flat line.
+    const y = Math.sin(t * 1.4 + 0.6) * 6 + (rnd() - 0.5) * 14;
+    // Z-jitter so puffs occlude/reveal each other across depth, which
+    // adds parallax cue when the camera rotates.
+    const z = -58 + (rnd() - 0.5) * 28;
+
+    // Square-ish: base 30-60 units, horizontal stretch capped at 1.5x.
+    // At that ratio the noise texture's features stay readable.
+    const base = 30 + rnd() * 32;
+    const stretch = 1.0 + rnd() * 0.5;
+    const scale: [number, number, number] = [base * stretch, base, 1];
+
+    // Density tapers at the band's ends (gaussian falloff in t).
+    const edgeMask = Math.exp(-t * t * 1.6);
+    const opacity = (0.09 + rnd() * 0.13) * edgeMask;
+
+    const color = palette[Math.floor(rnd() * palette.length)];
+    // Random rotation per puff so noise patterns from the shared texture
+    // don't align across sprites and give away the trick.
+    const rotation = (rnd() - 0.5) * Math.PI;
+
+    puffs.push({ position: [x, y, z], scale, color, opacity, rotation });
+  }
+  return puffs;
+})();
+
 function GalacticBand({ texture }: { texture: THREE.Texture }) {
   return (
     <group rotation={[0.15, 0, 0.4]}>
-      <sprite position={[0, 0, -60]} scale={[260, 50, 1]}>
-        <spriteMaterial
-          map={texture}
-          color="#5a4a8a"
-          transparent
-          opacity={0.32}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          depthTest={false}
-        />
-      </sprite>
-      <sprite position={[10, -2, -55]} scale={[200, 32, 1]}>
-        <spriteMaterial
-          map={texture}
-          color="#9a4a6a"
-          transparent
-          opacity={0.18}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          depthTest={false}
-        />
-      </sprite>
+      {BAND_PUFFS.map((p, i) => (
+        <sprite key={i} position={p.position} scale={p.scale}>
+          <spriteMaterial
+            map={texture}
+            color={p.color}
+            transparent
+            opacity={p.opacity}
+            rotation={p.rotation}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+            depthTest={false}
+          />
+        </sprite>
+      ))}
     </group>
   );
 }
