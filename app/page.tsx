@@ -70,12 +70,23 @@ function Hero() {
       <header className="relative z-10 flex items-center justify-between px-5 sm:px-8 pt-6 sm:pt-8 pointer-events-none">
         <Link
           href="/"
-          aria-label="Astroid Club home"
+          aria-label="Astroid Club home, beta"
           className="flex items-center gap-2.5 group pointer-events-auto"
         >
           <Logo />
           <span className="font-display text-base sm:text-lg tracking-tight text-white">
             astroid<span className="text-cosmos">.</span>club
+          </span>
+          {/* Tiny BETA pill. Sits inside the link so the whole lockup
+              reads as one brand mark; styled with the same cyan accent
+              the wordmark dot uses, kept low-key so it doesn't fight
+              the headline. */}
+          <span
+            aria-label="Beta"
+            className="ml-1 px-1.5 py-px rounded-sm font-mono text-[9px] sm:text-[10px] tracking-[0.2em] uppercase text-cosmos border border-cosmos/40 bg-cosmos/5 leading-none"
+            style={{ paddingTop: 2, paddingBottom: 2 }}
+          >
+            Beta
           </span>
         </Link>
         <span className="holder-chip pointer-events-auto">Holders only</span>
