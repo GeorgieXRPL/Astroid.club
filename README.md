@@ -6,13 +6,12 @@ Live at **[astroid.club](https://astroid.club)** (once DNS is pointed).
 
 ## What this is
 
-Astroid Club is the third surface in the Astroid family:
+Astroid Club sits alongside the mission site in the Astroid family:
 
 | Surface | Domain | Audience | Status |
 | --- | --- | --- | --- |
 | Mission site | `astroid.space` | Anyone (charity-first, kid-safe) | Live |
 | The Club | `astroid.club` | `$ASTROID` token holders | This repo · coming-soon page only |
-| The Lounge | `lounge.astroid.space` | Holders (token-gated freerolls) | In build |
 
 This repo contains a single-page coming-soon landing site. There is no waitlist form yet, no email capture, no wallet connect, no API. When the waitlist actually opens we will layer those in as a follow-up.
 

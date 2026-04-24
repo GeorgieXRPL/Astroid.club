@@ -34,7 +34,7 @@ export const branding = {
   headline: 'The Club is coming.',
   headlineAccent: 'Built for the community.',
   subhead:
-    'Astroid Club is the community home for $ASTROID holders. A place to gather, share, and be early to everything the Astroid family ships next - from the Lounge to perks, drops, and behind-the-scenes from the project.',
+    'Astroid Club is the community home for $ASTROID holders. A place to gather, share, and be early to everything the Astroid family ships next - perks, drops, live events, and behind-the-scenes from the project.',
 
   // Waitlist tease (v1: NOT a form, just a panel)
   waitlistEyebrow: 'Doors open soon',
@@ -60,9 +60,9 @@ export const branding = {
     },
     {
       tag: '03',
-      title: 'Lounge access',
+      title: 'Live events',
       body:
-        'A token-gated entry path into the Astroid Lounge - our freeroll poker tables. Project-funded prize pools, no buy-ins, no rake. The Club opens the door.',
+        'AMAs, listening parties, voice gatherings, and the kind of small live moments that only really work when you know everyone in the room is part of the same community.',
     },
     {
       tag: '04',
@@ -76,10 +76,9 @@ export const branding = {
   footer: {
     family: 'Part of the Astroid family',
     familyBlurb:
-      'Astroid Club is a community space. The mission site is at astroid.space. The freeroll poker tables are at the Lounge. All three are separate surfaces with separate rules.',
+      'Astroid Club is a community space for $ASTROID holders. The mission site - charity, Name a Star, the mascot - lives at astroid.space. Different surfaces, same family.',
     links: {
       space: { label: 'astroid.space', href: 'https://astroid.space' },
-      lounge: { label: 'Astroid Lounge', href: 'https://lounge.astroid.space' },
       security: { label: 'security@astroid.space', href: 'mailto:security@astroid.space' },
       hello: { label: 'hello@astroid.space', href: 'mailto:hello@astroid.space' },
     },

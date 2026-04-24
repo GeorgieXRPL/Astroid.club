@@ -236,23 +236,14 @@ function WaitlistTease() {
    ============================================================ */
 function FamilyStrip() {
   return (
-    <section className="relative max-w-5xl mx-auto px-4 sm:px-6 pb-20">
-      <div className="grid sm:grid-cols-2 gap-4">
-        <FamilyCard
-          tag="The mission site"
-          title="astroid.space"
-          body="Name a star. Color the mascot. See the on-chain charity wallet."
-          href={branding.footer.links.space.href}
-          cta="Open astroid.space"
-        />
-        <FamilyCard
-          tag="The freeroll tables"
-          title="Astroid Lounge"
-          body="Project-funded prize pools, no buy-ins, no rake. Token-gated entry."
-          href={branding.footer.links.lounge.href}
-          cta="See the Lounge"
-        />
-      </div>
+    <section className="relative max-w-2xl mx-auto px-4 sm:px-6 pb-20">
+      <FamilyCard
+        tag="The mission site"
+        title="astroid.space"
+        body="Name a star. Color the mascot. See the on-chain charity wallet that the Astroid project funds in real time."
+        href={branding.footer.links.space.href}
+        cta="Open astroid.space"
+      />
     </section>
   );
 }
@@ -321,14 +312,6 @@ function SiteFooter() {
                   className="text-white/70 hover:text-cosmos transition-colors"
                 >
                   {branding.footer.links.space.label}
-                </a>
-              </li>
-              <li>
-                <a
-                  href={branding.footer.links.lounge.href}
-                  className="text-white/70 hover:text-cosmos transition-colors"
-                >
-                  {branding.footer.links.lounge.label}
                 </a>
               </li>
             </ul>
