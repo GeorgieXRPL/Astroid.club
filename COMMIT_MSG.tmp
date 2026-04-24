@@ -1,6 +1,0 @@
-chore: drop accidental commit-message scratch + ignore pattern.
-
-PowerShell does not support heredocs, so I scratch commit messages to
-COMMIT_MSG.tmp and commit with `git commit -F`. The previous commit
-accidentally tracked the scratch file. This commit removes it from
-git and adds the filename to .gitignore so it cannot happen again.
