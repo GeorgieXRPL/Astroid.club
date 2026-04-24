@@ -56,28 +56,39 @@ function makeRadialTexture(size: number, sharpness: number): THREE.Texture {
 }
 
 /**
- * Soft cloud texture for the Milky Way band and large nebulae.
+ * Soft cloud texture for nebulae and the galactic band.
  *
- * Three things matter for "no visible edges" when these sprites are
- * scaled to 100+ world units and bloom-amplified:
+ * Why this is structured the way it is:
  *
- *   1. Edge falloff must be gaussian-soft, not power-of-radial.
- *      `pow(1 - d, 1.3)` cuts hard at d=1 (the inscribed circle),
- *      which reads as a circular outline once magnified. A real
- *      gaussian `exp(-(d*k)^2)` decays continuously past d=1 with
- *      no inflection, so there is no boundary to perceive.
+ *   Value noise (a grid of random scalars + smoothstep interpolation)
+ *   has a fundamental flaw for cloud textures: every grid corner is
+ *   an extremum, so the noise has zero derivative there. That creates
+ *   visible "blob" cells - rounded squares with flat tops. Smoothstep
+ *   hides the linear seams but cannot hide the blob shape, and once a
+ *   sprite is bloom-amplified the eye reads it as blockiness.
  *
- *   2. The noise grid must not repeat. The previous implementation
- *      sampled the same N=32 grid at two frequencies, which created
- *      the same blob shape twice and read as a self-similar pattern.
- *      We now build two independent grids at different resolutions
- *      and blend them - real fractal noise, no echo.
+ *   Perlin gradient noise fixes this at the source. Each grid corner
+ *   gets a unit-length random gradient VECTOR; the noise value at a
+ *   sample point is the interpolated dot product of that point's
+ *   distance from each corner with that corner's gradient. Crucially:
  *
- *   3. Anisotropic filtering on the GL texture so when the sprite
- *      is stretched 5x along one axis (the Milky Way band) the
- *      sampler doesn't alias into visible diagonal lines.
+ *     - The noise is exactly zero at every grid corner.
+ *     - The derivative is non-zero and varies continuously through
+ *       corners (with the fade(t) = 6t^5 - 15t^4 + 10t^3 quintic).
+ *
+ *   Result: flowing curves, no blobs, no perceptible cell structure.
+ *
+ *   Four octaves (8, 16, 32, 64 cells) with halving amplitude give us
+ *   classic fbm - large shapes layered with progressively finer detail
+ *   - on top of a true gaussian edge falloff so the sprite has no
+ *   perceptible boundary.
+ *
+ *   We expose a `seed` parameter so the caller can build several
+ *   independent variants. Overlapping sprites that share the same
+ *   texture would echo each other's pattern and give the trick away;
+ *   distributing variants across the scene eliminates that.
  */
-function makeCloudTexture(size: number): THREE.Texture {
+function makeCloudTexture(size: number, seed: number): THREE.Texture {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
@@ -85,8 +96,8 @@ function makeCloudTexture(size: number): THREE.Texture {
   const img = ctx.createImageData(size, size);
   const data = img.data;
 
-  // Seeded PRNG so the cloud shape is deterministic across reloads.
-  let s = 0x9e3779b1;
+  // Seeded PRNG so each variant is deterministic across reloads.
+  let s = (seed | 0) || 0x9e3779b1;
   const rnd = () => {
     s = (s + 0x6d2b79f5) >>> 0;
     let t = s;
@@ -95,11 +106,22 @@ function makeCloudTexture(size: number): THREE.Texture {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 
-  // Build N independent noise octaves. Each octave is its own grid
-  // (so they cannot repeat) at progressively finer resolution.
+  /**
+   * One Perlin octave at NxN grid resolution. Returns a sampler over
+   * the unit square (u, v in [0, 1]) producing values in roughly
+   * [-0.7, 0.7]; we remap to [0, 1] at the consumer.
+   */
   const makeOctave = (N: number) => {
-    const grid = new Float32Array(N * N);
-    for (let i = 0; i < N * N; i++) grid[i] = rnd();
+    const gx = new Float32Array(N * N);
+    const gy = new Float32Array(N * N);
+    for (let i = 0; i < N * N; i++) {
+      const a = rnd() * Math.PI * 2;
+      gx[i] = Math.cos(a);
+      gy[i] = Math.sin(a);
+    }
+    // Quintic fade curve: zero first AND second derivative at endpoints.
+    // This is what gives Perlin its flowing, derivative-continuous look.
+    const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
     return (u: number, v: number) => {
       const x = u * (N - 1);
       const y = v * (N - 1);
@@ -109,54 +131,58 @@ function makeCloudTexture(size: number): THREE.Texture {
       const fy = y - y0;
       const x1 = Math.min(N - 1, x0 + 1);
       const y1 = Math.min(N - 1, y0 + 1);
-      const a = grid[y0 * N + x0];
-      const b = grid[y0 * N + x1];
-      const c = grid[y1 * N + x0];
-      const d = grid[y1 * N + x1];
-      // Smoothstep in both axes: derivative-continuous, no grid lines.
-      const sx = fx * fx * (3 - 2 * fx);
-      const sy = fy * fy * (3 - 2 * fy);
-      return (
-        a * (1 - sx) * (1 - sy) +
-        b * sx * (1 - sy) +
-        c * (1 - sx) * sy +
-        d * sx * sy
-      );
+      // Dot product of (sample - corner) with each corner's gradient.
+      const i00 = y0 * N + x0;
+      const i10 = y0 * N + x1;
+      const i01 = y1 * N + x0;
+      const i11 = y1 * N + x1;
+      const d00 = gx[i00] * fx + gy[i00] * fy;
+      const d10 = gx[i10] * (fx - 1) + gy[i10] * fy;
+      const d01 = gx[i01] * fx + gy[i01] * (fy - 1);
+      const d11 = gx[i11] * (fx - 1) + gy[i11] * (fy - 1);
+      const ux = fade(fx);
+      const uy = fade(fy);
+      const top = d00 + ux * (d10 - d00);
+      const bot = d01 + ux * (d11 - d01);
+      return top + uy * (bot - top);
     };
   };
 
-  const oct1 = makeOctave(48); //   broad shape (~48 cells)
-  const oct2 = makeOctave(128); //  mid detail
-  const oct3 = makeOctave(256); //  fine detail (texture-sized cells)
+  const o1 = makeOctave(8); //   broad gas shape
+  const o2 = makeOctave(16); //  mid wisp structure
+  const o3 = makeOctave(32); //  fine streaks
+  const o4 = makeOctave(64); //  micro detail
 
-  // Falloff constant: e^-(d*k)^2 reaches ~0.05 by d=1.2, ~0.005 by 1.5.
-  // Tuned so the edge is invisible but the cloud still has body to d~1.0.
+  // Tuned so edge fade is essentially zero by d~1.4 with no perceptible
+  // boundary anywhere within the sprite quad.
   const k = 1.35;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
       const dx = (x - cx) / cx;
       const dy = (y - cx) / cx;
-      const d2 = dx * dx + dy * dy;
-      // True gaussian falloff. No Math.max, no power curve, no boundary.
-      const edgeFade = Math.exp(-(k * k) * d2);
-      const n =
-        oct1(x / size, y / size) * 0.55 +
-        oct2(x / size, y / size) * 0.30 +
-        oct3(x / size, y / size) * 0.15;
-      const a = edgeFade * n;
+      const edgeFade = Math.exp(-(k * k) * (dx * dx + dy * dy));
+      // Classic fbm: amplitudes 1/2, 1/4, 1/8, 1/16. Remap from
+      // Perlin's signed range to [0, 1].
+      const raw =
+        o1(u, v) * 0.5 +
+        o2(u, v) * 0.25 +
+        o3(u, v) * 0.125 +
+        o4(u, v) * 0.0625;
+      const n = raw * 0.7 + 0.5; // ~[0, 1]
+      const a = edgeFade * Math.max(0, Math.min(1, n));
       const i = (y * size + x) * 4;
       data[i] = 255;
       data[i + 1] = 255;
       data[i + 2] = 255;
-      data[i + 3] = Math.round(Math.min(1, a) * 255);
+      data[i + 3] = Math.round(a * 255);
     }
   }
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  // Trilinear filtering + max anisotropy so stretched/distant sprites
-  // sample smoothly instead of aliasing into visible bands.
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = true;
@@ -169,17 +195,22 @@ function makeCloudTexture(size: number): THREE.Texture {
 /*  Background structures                                                      */
 /* -------------------------------------------------------------------------- */
 
-interface NebulaCloud {
+/**
+ * Each entry is a NEBULA CENTER - a notional cloud anchor in space.
+ * At module load time we explode each anchor into a cluster of small
+ * overlapping puffs (see `NEBULA_PUFFS` below). Same trick we used for
+ * the galactic band: one big stretched sprite shows its texture's
+ * structure; many small ones with varied position/rotation/texture
+ * variant blend into something that has no perceptible repetition.
+ */
+interface NebulaAnchor {
   position: [number, number, number];
   scale: number;
   color: string;
   opacity: number;
 }
 
-// Hand-tuned, deliberately few and large. Sit far beyond the star shell.
-// Slightly punchier than .space's defaults so the empty hero has more
-// chromatic depth - this is a coming-soon mood piece, not a star catalog.
-const NEBULAE: ReadonlyArray<NebulaCloud> = [
+const NEBULA_ANCHORS: ReadonlyArray<NebulaAnchor> = [
   { position: [-60, 6, -90], scale: 130, color: '#3b3a8a', opacity: 0.42 },
   { position: [70, -10, -85], scale: 150, color: '#7a2a6a', opacity: 0.32 },
   { position: [10, 22, 95], scale: 120, color: '#1f5d8a', opacity: 0.36 },
@@ -190,16 +221,79 @@ const NEBULAE: ReadonlyArray<NebulaCloud> = [
   { position: [-80, -25, -20], scale: 75, color: '#ff7a45', opacity: 0.12 },
 ];
 
-function NebulaField({ texture }: { texture: THREE.Texture }) {
+interface NebulaPuff {
+  position: [number, number, number];
+  scale: number;
+  color: string;
+  opacity: number;
+  rotation: number;
+  textureIndex: number;
+}
+
+/**
+ * Explode each nebula anchor into 6 small puffs scattered within ~40%
+ * of the anchor's scale, with per-puff color/opacity/rotation jitter
+ * and a random texture-variant index. Total ~48 sprites instead of 8 -
+ * negligible perf cost, dramatic quality difference.
+ */
+const NEBULA_PUFFS: ReadonlyArray<NebulaPuff> = (() => {
+  let s = 0xa5b6c7d8;
+  const rnd = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const out: NebulaPuff[] = [];
+  const PUFFS_PER_ANCHOR = 6;
+  for (const a of NEBULA_ANCHORS) {
+    const spread = a.scale * 0.4;
+    for (let i = 0; i < PUFFS_PER_ANCHOR; i++) {
+      // Bias the first puff toward the anchor center so each cluster
+      // has a "core"; the rest scatter freely.
+      const bias = i === 0 ? 0.15 : 1.0;
+      const ox = (rnd() - 0.5) * spread * 2 * bias;
+      const oy = (rnd() - 0.5) * spread * 1.4 * bias;
+      const oz = (rnd() - 0.5) * spread * 1.6 * bias;
+      // Puff scales 35-65% of anchor scale. Smaller than the original
+      // sprite, so the texture is sampled at a finer effective rate
+      // and any feature stays sub-perceptual.
+      const scale = a.scale * (0.35 + rnd() * 0.3);
+      // Opacity per puff: anchor opacity / sqrt(count) keeps total
+      // luminance roughly constant after additive blending, then
+      // jittered +/- 25%.
+      const opacity =
+        (a.opacity / Math.sqrt(PUFFS_PER_ANCHOR)) * (0.75 + rnd() * 0.5);
+      out.push({
+        position: [
+          a.position[0] + ox,
+          a.position[1] + oy,
+          a.position[2] + oz,
+        ],
+        scale,
+        color: a.color,
+        opacity,
+        rotation: (rnd() - 0.5) * Math.PI,
+        textureIndex: Math.floor(rnd() * 3),
+      });
+    }
+  }
+  return out;
+})();
+
+function NebulaField({ textures }: { textures: ReadonlyArray<THREE.Texture> }) {
   return (
     <group>
-      {NEBULAE.map((c, i) => (
-        <sprite key={i} position={c.position} scale={c.scale}>
+      {NEBULA_PUFFS.map((p, i) => (
+        <sprite key={i} position={p.position} scale={p.scale}>
           <spriteMaterial
-            map={texture}
-            color={c.color}
+            map={textures[p.textureIndex] ?? textures[0]}
+            color={p.color}
             transparent
-            opacity={c.opacity}
+            opacity={p.opacity}
+            rotation={p.rotation}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
             depthTest={false}
@@ -236,6 +330,7 @@ interface BandPuff {
   color: string;
   opacity: number;
   rotation: number;
+  textureIndex: number;
 }
 
 const BAND_PUFFS: ReadonlyArray<BandPuff> = (() => {
@@ -286,22 +381,36 @@ const BAND_PUFFS: ReadonlyArray<BandPuff> = (() => {
     const opacity = (0.09 + rnd() * 0.13) * edgeMask;
 
     const color = palette[Math.floor(rnd() * palette.length)];
-    // Random rotation per puff so noise patterns from the shared texture
-    // don't align across sprites and give away the trick.
+    // Random rotation per puff so noise patterns don't align across
+    // sprites and give the trick away.
     const rotation = (rnd() - 0.5) * Math.PI;
+    // Round-robin across the three texture variants so adjacent puffs
+    // tend not to share a pattern.
+    const textureIndex = Math.floor(rnd() * 3);
 
-    puffs.push({ position: [x, y, z], scale, color, opacity, rotation });
+    puffs.push({
+      position: [x, y, z],
+      scale,
+      color,
+      opacity,
+      rotation,
+      textureIndex,
+    });
   }
   return puffs;
 })();
 
-function GalacticBand({ texture }: { texture: THREE.Texture }) {
+function GalacticBand({
+  textures,
+}: {
+  textures: ReadonlyArray<THREE.Texture>;
+}) {
   return (
     <group rotation={[0.15, 0, 0.4]}>
       {BAND_PUFFS.map((p, i) => (
         <sprite key={i} position={p.position} scale={p.scale}>
           <spriteMaterial
-            map={texture}
+            map={textures[p.textureIndex] ?? textures[0]}
             color={p.color}
             transparent
             opacity={p.opacity}
@@ -378,12 +487,17 @@ function DustField({
  * far enough that the scene goes empty.
  */
 export function StarFieldHero() {
-  // 512px gives the 256-cell octave room to actually resolve. The
-  // texture is created once on mount and lives for the page lifetime,
-  // so the extra ~750KB is paid once and never again.
+  // Three independent cloud variants so overlapping sprites don't echo
+  // each other's pattern. 512px each (~750KB), built once on mount;
+  // mipmaps + anisotropy are set at texture-creation time. Total cost
+  // is paid once and the GPU caches all three forever after.
   const textures = useMemo(
     () => ({
-      cloud: makeCloudTexture(512),
+      clouds: [
+        makeCloudTexture(512, 0x12345678),
+        makeCloudTexture(512, 0x9abcdef0),
+        makeCloudTexture(512, 0xfeedface),
+      ] as ReadonlyArray<THREE.Texture>,
       dust: makeRadialTexture(32, 2.0),
     }),
     []
@@ -405,8 +519,8 @@ export function StarFieldHero() {
         >
           <ambientLight intensity={0.2} />
 
-          <GalacticBand texture={textures.cloud} />
-          <NebulaField texture={textures.cloud} />
+          <GalacticBand textures={textures.clouds} />
+          <NebulaField textures={textures.clouds} />
 
           {/* Four layers of deep starfield - very far / far / mid / near.
               Different sizes and speeds give real parallax when the
