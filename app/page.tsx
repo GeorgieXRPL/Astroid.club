@@ -1,54 +1,95 @@
 import Link from 'next/link';
 import { branding } from './lib/branding';
+import { HeroSceneClient } from './components/HeroSceneClient';
 
 /**
  * Astroid Club - coming-soon landing page.
  *
- * Single route, fully static, no client-side JS beyond what Next ships
- * by default. The waitlist card is intentionally NOT a form yet - we
- * collect nothing in v1. When the waitlist actually opens, the
- * <WaitlistTease /> block becomes <WaitlistForm /> in a follow-up PR.
+ * One screen. One mood: something is about to open and you want to be
+ * on the right side of the door. Three.js drift-through-the-galaxy
+ * scene behind, minimal centered copy in front, condensed legal +
+ * family links tucked into the footer.
  *
- * All copy is sourced from branding.ts so a compliance review is a
- * single-file diff.
+ * The whole hero is intentionally short on words. The mystery does
+ * the work. No tease cards, no feature lists, no sign-up form.
  */
 export default function HomePage() {
   return (
     <>
-      <SiteHeader />
-
-      <main className="flex-1">
-        <Hero />
-        <TeaseGrid />
-        <WaitlistTease />
-        <FamilyStrip />
-      </main>
-
+      <Hero />
       <SiteFooter />
     </>
   );
 }
 
 /* ============================================================
-   Header - intentionally tiny. No nav (single-page site), just
-   the wordmark + a quiet "holders" chip so the surface tells you
-   who it's for at a glance.
+   Hero - full viewport, three.js scene behind, dim vignette,
+   minimal centered copy. The "what's behind the door?" energy
+   comes from sparseness, not from explanation.
    ============================================================ */
-function SiteHeader() {
+function Hero() {
   return (
-    <header className="relative z-20">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 flex items-center justify-between gap-4">
-        <Link href="/" className="flex items-center gap-2.5 group" aria-label="Astroid Club home">
+    <section className="relative min-h-screen w-full overflow-hidden flex flex-col">
+      {/* Three.js starfield behind everything */}
+      <div className="absolute inset-0 z-0">
+        <HeroSceneClient />
+      </div>
+
+      {/* Soft inner vignette so text always wins against the bloom */}
+      <div
+        aria-hidden
+        className="absolute inset-0 z-[1] pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse at center, transparent 0%, rgba(0,8,20,0.55) 70%, rgba(0,8,20,0.85) 100%)',
+        }}
+      />
+
+      {/* Top bar: wordmark + holders chip */}
+      <header className="relative z-10 flex items-center justify-between px-5 sm:px-8 pt-6 sm:pt-8">
+        <Link
+          href="/"
+          aria-label="Astroid Club home"
+          className="flex items-center gap-2.5 group"
+        >
           <Logo />
           <span className="font-display text-base sm:text-lg tracking-tight text-white">
-            Astroid<span className="text-cosmos">.</span>club
+            astroid<span className="text-cosmos">.</span>club
           </span>
         </Link>
-        <span className="holder-chip" aria-label="For holders of $ASTROID">
-          For $ASTROID holders
+        <span className="holder-chip">Holders only</span>
+      </header>
+
+      {/* Center stage */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-5 sm:px-8 py-12">
+        <div className="eyebrow mb-6 sm:mb-8 opacity-90">
+          {branding.eyebrow}
+        </div>
+
+        <h1 className="font-display text-6xl sm:text-7xl lg:text-8xl xl:text-9xl font-bold tracking-tight text-white leading-[0.95] mb-5 sm:mb-7 warm-glow">
+          {branding.headline}
+        </h1>
+
+        <p className="font-display text-xl sm:text-2xl lg:text-3xl text-white/65 tracking-tight max-w-2xl">
+          {branding.subhead}
+        </p>
+
+        <div className="mt-12 sm:mt-16 text-xs sm:text-sm font-mono text-white/45 tracking-[0.32em] uppercase">
+          {branding.teaseLine}
+        </div>
+      </div>
+
+      {/* Bottom strip - status + small "stay close" line */}
+      <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-3 px-5 sm:px-8 pb-6 sm:pb-8 text-xs font-mono text-white/45 tracking-[0.18em] uppercase">
+        <span className="flex items-center gap-2.5">
+          <span className="live-dot" aria-hidden />
+          {branding.status} · v0.1
+        </span>
+        <span className="text-white/55 normal-case tracking-normal font-sans text-sm">
+          {branding.callsign}
         </span>
       </div>
-    </header>
+    </section>
   );
 }
 
@@ -73,283 +114,66 @@ function Logo() {
 }
 
 /* ============================================================
-   Hero
-   ============================================================ */
-function Hero() {
-  return (
-    <section className="relative overflow-hidden">
-      {/* Atmospheric glow blobs - cheap, GPU-friendly, no JS needed. */}
-      <div className="glow-cyan" style={{ top: '-120px', left: '-80px' }} />
-      <div className="glow-ember" style={{ top: '60px', right: '-100px' }} />
-
-      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-20 sm:pt-28 pb-16 sm:pb-24">
-        <div className="max-w-3xl">
-          <div className="eyebrow mb-5">{branding.eyebrow}</div>
-
-          <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-white leading-[1.04] mb-6">
-            {branding.headline}
-            <span className="block text-white/55 mt-2">
-              {branding.headlineAccent}
-            </span>
-          </h1>
-
-          <p className="text-lg text-white/70 leading-relaxed max-w-2xl mb-10">
-            {branding.subhead}
-          </p>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <a
-              href="#waitlist"
-              className="btn-primary"
-            >
-              See what is coming
-              <span aria-hidden>↓</span>
-            </a>
-            <Link
-              href={branding.footer.links.space.href}
-              className="btn-secondary"
-            >
-              Visit astroid.space
-              <span aria-hidden>↗</span>
-            </Link>
-          </div>
-
-          <div className="mt-12 flex flex-wrap items-center gap-x-8 gap-y-3 text-xs font-mono uppercase tracking-[0.18em] text-white/40">
-            <span>Solana · $ASTROID</span>
-            <span aria-hidden>·</span>
-            <span>Community-first</span>
-            <span aria-hidden>·</span>
-            <span>est. 2026</span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ============================================================
-   Tease grid - 4 cards of "what's coming"
-   ============================================================ */
-function TeaseGrid() {
-  return (
-    <section className="relative max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-      <div className="section-divider mb-10">What's coming</div>
-
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {branding.teases.map((tease) => (
-          <TeaseCard
-            key={tease.tag}
-            tag={tease.tag}
-            title={tease.title}
-            body={tease.body}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function TeaseCard({
-  tag,
-  title,
-  body,
-}: {
-  tag: string;
-  title: string;
-  body: string;
-}) {
-  return (
-    <article className="glass-panel p-6 hover:border-cosmos/40 transition-colors">
-      <div className="telemetry-label mb-4">{tag}</div>
-      <h3 className="font-display text-lg font-semibold text-white tracking-tight mb-2">
-        {title}
-      </h3>
-      <p className="text-sm text-white/60 leading-relaxed">{body}</p>
-    </article>
-  );
-}
-
-/* ============================================================
-   Waitlist tease - NOT a form yet. Just a panel that says "soon".
-   ============================================================ */
-function WaitlistTease() {
-  return (
-    <section
-      id="waitlist"
-      className="relative max-w-4xl mx-auto px-4 sm:px-6 py-16 sm:py-24 scroll-mt-20"
-    >
-      <div className="glass-panel-bright p-8 sm:p-12 text-center relative overflow-hidden">
-        {/* soft inner glow */}
-        <div
-          aria-hidden
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              'radial-gradient(circle at 50% 0%, rgba(0, 212, 255, 0.18) 0%, transparent 60%)',
-          }}
-        />
-
-        <div className="relative">
-          <div className="eyebrow mb-3">{branding.waitlistEyebrow}</div>
-          <h2 className="font-display text-3xl sm:text-4xl font-bold text-white tracking-tight mb-5">
-            {branding.waitlistTitle}
-          </h2>
-          <p className="text-white/70 max-w-xl mx-auto leading-relaxed mb-8">
-            {branding.waitlistBody}
-          </p>
-
-          {/* Faux input row - communicates intent without collecting data.
-              When the waitlist actually opens this becomes a real form. */}
-          <div
-            aria-hidden
-            className="max-w-md mx-auto flex items-center gap-2 p-1.5 rounded-xl border border-white/10 bg-black/30"
-          >
-            <div className="flex-1 px-4 py-2.5 text-left text-sm text-white/35 font-mono">
-              you@somewhere.dev
-            </div>
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              className="btn-primary text-sm"
-              title="The waitlist is not open yet"
-            >
-              Soon
-            </button>
-          </div>
-
-          <p className="mt-6 text-xs font-mono text-white/35 tracking-wider uppercase">
-            Not collecting yet · We will announce when it opens
-          </p>
-
-          <p className="mt-8 text-xs text-white/40 leading-relaxed max-w-xl mx-auto">
-            {branding.waitlistFootnote}
-          </p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ============================================================
-   Family strip - quiet promo for the rest of the Astroid family
-   ============================================================ */
-function FamilyStrip() {
-  return (
-    <section className="relative max-w-2xl mx-auto px-4 sm:px-6 pb-20">
-      <FamilyCard
-        tag="The mission site"
-        title="astroid.space"
-        body="Name a star. Color the mascot. See the on-chain charity wallet that the Astroid project funds in real time."
-        href={branding.footer.links.space.href}
-        cta="Open astroid.space"
-      />
-    </section>
-  );
-}
-
-function FamilyCard({
-  tag,
-  title,
-  body,
-  href,
-  cta,
-}: {
-  tag: string;
-  title: string;
-  body: string;
-  href: string;
-  cta: string;
-}) {
-  return (
-    <a
-      href={href}
-      className="glass-panel p-6 group hover:border-cosmos/40 transition-colors block"
-      target={href.startsWith('http') ? '_blank' : undefined}
-      rel={href.startsWith('http') ? 'noopener noreferrer' : undefined}
-    >
-      <div className="telemetry-label mb-3">{tag}</div>
-      <h3 className="font-display text-xl font-semibold text-white tracking-tight mb-2">
-        {title}
-      </h3>
-      <p className="text-sm text-white/60 leading-relaxed mb-5">{body}</p>
-      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-cosmos group-hover:text-white transition-colors">
-        {cta} <span aria-hidden>→</span>
-      </span>
-    </a>
-  );
-}
-
-/* ============================================================
-   Footer - family blurb + legal disclaimers + contact links
+   Footer - only visible if you scroll. Small, dense, all the
+   legal disclaimers in one quiet block.
    ============================================================ */
 function SiteFooter() {
   const year = new Date().getFullYear();
-
   return (
-    <footer className="relative border-t border-white/5 bg-black/20 backdrop-blur-sm">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14">
-        <div className="grid lg:grid-cols-3 gap-10">
+    <footer className="relative z-10 border-t border-white/5 bg-black/40 backdrop-blur-sm">
+      <div className="max-w-5xl mx-auto px-5 sm:px-8 py-10">
+        <div className="grid md:grid-cols-3 gap-8">
           <div>
-            <div className="flex items-center gap-2.5 mb-4">
+            <div className="flex items-center gap-2.5 mb-3">
               <Logo />
-              <span className="font-display text-base tracking-tight text-white">
-                Astroid<span className="text-cosmos">.</span>club
+              <span className="font-display text-sm tracking-tight text-white">
+                astroid<span className="text-cosmos">.</span>club
               </span>
             </div>
             <div className="telemetry-label mb-2">{branding.footer.family}</div>
-            <p className="text-sm text-white/55 leading-relaxed max-w-sm">
-              {branding.footer.familyBlurb}
-            </p>
+            <a
+              href={branding.footer.space.href}
+              className="text-sm text-white/65 hover:text-cosmos transition-colors"
+            >
+              {branding.footer.space.label} →
+            </a>
           </div>
 
           <div>
-            <div className="telemetry-label mb-3">Family</div>
+            <div className="telemetry-label mb-3">Get in touch</div>
             <ul className="space-y-2 text-sm">
               <li>
                 <a
-                  href={branding.footer.links.space.href}
-                  className="text-white/70 hover:text-cosmos transition-colors"
+                  href={branding.footer.hello.href}
+                  className="text-white/65 hover:text-cosmos transition-colors"
                 >
-                  {branding.footer.links.space.label}
-                </a>
-              </li>
-            </ul>
-
-            <div className="telemetry-label mt-6 mb-3">Get in touch</div>
-            <ul className="space-y-2 text-sm">
-              <li>
-                <a
-                  href={branding.footer.links.hello.href}
-                  className="text-white/70 hover:text-cosmos transition-colors"
-                >
-                  {branding.footer.links.hello.label}
+                  {branding.footer.hello.label}
                 </a>
               </li>
               <li>
                 <a
-                  href={branding.footer.links.security.href}
-                  className="text-white/70 hover:text-cosmos transition-colors"
+                  href={branding.footer.security.href}
+                  className="text-white/65 hover:text-cosmos transition-colors"
                 >
-                  {branding.footer.links.security.label}
+                  {branding.footer.security.label}
                 </a>
               </li>
             </ul>
           </div>
 
           <div>
-            <div className="telemetry-label mb-3">{branding.footer.legal.heading}</div>
-            <div className="space-y-3 text-xs text-white/45 leading-relaxed">
-              {branding.footer.legal.lines.map((line, i) => (
+            <div className="telemetry-label mb-3">Important</div>
+            <div className="space-y-2 text-[11px] text-white/40 leading-relaxed">
+              {branding.footer.legal.map((line, i) => (
                 <p key={i}>{line}</p>
               ))}
             </div>
           </div>
         </div>
 
-        <div className="mt-12 pt-6 border-t border-white/5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-white/35 uppercase tracking-[0.16em]">
+        <div className="mt-8 pt-5 border-t border-white/5 flex flex-wrap items-center justify-between gap-3 text-[10px] font-mono text-white/30 uppercase tracking-[0.18em]">
           <span>© {year} Astroid · {branding.footer.rights}</span>
-          <span>Coming soon · v0.1</span>
+          <span>Coming soon</span>
         </div>
       </div>
     </footer>

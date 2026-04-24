@@ -23,74 +23,39 @@
  *   4. No financial advice, ever.
  *   5. The waitlist is "opening soon". No fake form, no fake countdown,
  *      no email capture in v1.
+ *   6. Be sparse. The whole page should fit on one screen and feel like
+ *      something is about to happen, not like an essay.
  */
 
 export const branding = {
   brandName: 'Astroid Club',
   brandShort: 'astroid.club',
 
-  // Hero
-  eyebrow: 'For holders of $ASTROID · est. 2026',
-  headline: 'The Club is coming.',
-  headlineAccent: 'Built for the community.',
-  subhead:
-    'Astroid Club is the community home for $ASTROID holders. A place to gather, share, and be early to everything the Astroid family ships next - perks, drops, live events, and behind-the-scenes from the project.',
+  // Hero - intentionally short. Mystery + intent, not a sales pitch.
+  eyebrow: 'For holders of $ASTROID',
+  headline: 'Knock, knock.',
+  subhead: 'A door is about to open.',
 
-  // Waitlist tease (v1: NOT a form, just a panel)
-  waitlistEyebrow: 'Doors open soon',
-  waitlistTitle: 'The waitlist opens soon.',
-  waitlistBody:
-    'Hold $ASTROID and stay close - we are opening the doors here first. No signup form yet; we will announce when the waitlist goes live across the project channels.',
-  waitlistFootnote:
-    'Holding $ASTROID is not a contract, not a promise, and not an investment. It just means you are part of the community we are building this for.',
+  // Tease - one line of taxonomy, four words. Lets the imagination do
+  // the work without us having to over-promise any specific feature.
+  teaseLine: 'Community · Perks · Events · Lore',
 
-  // Tease cards - what's coming
-  teases: [
-    {
-      tag: '01',
-      title: 'A community hub',
-      body:
-        'A real home for the Astroid community. Conversations, builds, art, and the people behind it - somewhere that is ours, not rented from a feed.',
-    },
-    {
-      tag: '02',
-      title: 'Holder perks',
-      body:
-        'Small thank-yous from the project to people who hold the token. Early access to new things, occasional drops at the operator’s discretion, and surprises we are not going to ruin by listing here.',
-    },
-    {
-      tag: '03',
-      title: 'Live events',
-      body:
-        'AMAs, listening parties, voice gatherings, and the kind of small live moments that only really work when you know everyone in the room is part of the same community.',
-    },
-    {
-      tag: '04',
-      title: 'Behind the scenes',
-      body:
-        'Build notes, sketches, mascot lore, and the weird little decisions that go into shipping a kid-drawn character into a real internet project. Inside-baseball, for the people who care.',
-    },
-  ] as const,
+  // Bottom strip
+  status: 'Coming soon',
+  callsign: 'Stay close — the doors open here first.',
 
-  // Footer
+  // Footer (deliberately minimal - the heavy disclaimers live here)
   footer: {
     family: 'Part of the Astroid family',
-    familyBlurb:
-      'Astroid Club is a community space for $ASTROID holders. The mission site - charity, Name a Star, the mascot - lives at astroid.space. Different surfaces, same family.',
-    links: {
-      space: { label: 'astroid.space', href: 'https://astroid.space' },
-      security: { label: 'security@astroid.space', href: 'mailto:security@astroid.space' },
-      hello: { label: 'hello@astroid.space', href: 'mailto:hello@astroid.space' },
-    },
-    legal: {
-      heading: 'Important',
-      lines: [
-        'Astroid Club is a community surface for the $ASTROID token community. Nothing on this site is an offer, solicitation, or recommendation to buy any token, and nothing here is investment, financial, legal, or tax advice.',
-        '$ASTROID is a community token. Holding it is not a security interest, not a share, and does not entitle you to any contractual benefit, profit, or future asset distribution.',
-        'This domain (astroid.club) does not represent or speak for any charity. Charity-related disclosures live at astroid.space/charity.',
-        'The Club itself is in development. Features described above are intentions, not promises - they may change, ship later, or not ship at all.',
-      ],
-    },
+    space: { label: 'astroid.space', href: 'https://astroid.space' },
+    hello: { label: 'hello@astroid.space', href: 'mailto:hello@astroid.space' },
+    security: { label: 'security@astroid.space', href: 'mailto:security@astroid.space' },
+    legal: [
+      'Astroid Club is a community surface for the $ASTROID token community. Nothing on this site is an offer, solicitation, or recommendation to buy any token, and nothing here is investment, financial, legal, or tax advice.',
+      '$ASTROID is a community token. Holding it is not a security interest, not a share, and does not entitle you to any contractual benefit, profit, or future asset distribution.',
+      'This domain (astroid.club) does not represent or speak for any charity. Charity-related disclosures live at astroid.space/charity.',
+      'The Club is in development. Anything we tease here is intent, not a promise — features may change, ship later, or not ship at all.',
+    ],
     rights: 'All rights reserved.',
   },
 } as const;
