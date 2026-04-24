@@ -1,0 +1,35 @@
+Initial coming-soon site for Astroid Club.
+
+The community home for $ASTROID holders, third surface in the Astroid
+family alongside astroid.space (mission) and lounge.astroid.space
+(freeroll poker).
+
+What's in v1
+- Single static landing page: header, hero, four "what's coming" tease
+  cards, a non-interactive "waitlist opens soon" panel, family strip
+  linking the rest of the Astroid surfaces, and a compliance footer.
+- Theme variables and starfield CSS lifted from astroid.space so the
+  family reads as one visual system.
+- Security headers via proxy.ts (HSTS, CSP, COOP, CORP, X-Frame, etc.)
+  matching astroid.space.
+- All user-facing strings centralized in app/lib/branding.ts so a
+  compliance review is a single-file diff.
+
+What's intentionally NOT in v1
+- No waitlist form, no email capture, no API, no Supabase.
+- No wallet connect, no Solana SDK.
+- No countdown timer to a date we don't have.
+- No St. Jude or charity copy on this domain - that messaging stays on
+  astroid.space/charity. Footer link only.
+
+Compliance posture
+- No price talk, no "100x" or "moon" copy, no implied future token value.
+- No promises to holders. Drops described as discretionary, not earned.
+- Token holding framed as community participation, not an investment.
+
+Stack
+- Next.js 16 + React 19 + Tailwind 4 + TypeScript strict.
+- No three.js / r3f - the CSS gradient starfield is enough for a static
+  page and saves us hundreds of KB of JS.
+
+Verified clean: npm run typecheck and npm run build both pass.
