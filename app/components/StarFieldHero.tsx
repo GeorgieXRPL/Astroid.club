@@ -57,7 +57,25 @@ function makeRadialTexture(size: number, sharpness: number): THREE.Texture {
 
 /**
  * Soft cloud texture for the Milky Way band and large nebulae.
- * Layered low-frequency value noise - no image assets needed.
+ *
+ * Three things matter for "no visible edges" when these sprites are
+ * scaled to 100+ world units and bloom-amplified:
+ *
+ *   1. Edge falloff must be gaussian-soft, not power-of-radial.
+ *      `pow(1 - d, 1.3)` cuts hard at d=1 (the inscribed circle),
+ *      which reads as a circular outline once magnified. A real
+ *      gaussian `exp(-(d*k)^2)` decays continuously past d=1 with
+ *      no inflection, so there is no boundary to perceive.
+ *
+ *   2. The noise grid must not repeat. The previous implementation
+ *      sampled the same N=32 grid at two frequencies, which created
+ *      the same blob shape twice and read as a self-similar pattern.
+ *      We now build two independent grids at different resolutions
+ *      and blend them - real fractal noise, no echo.
+ *
+ *   3. Anisotropic filtering on the GL texture so when the sprite
+ *      is stretched 5x along one axis (the Milky Way band) the
+ *      sampler doesn't alias into visible diagonal lines.
  */
 function makeCloudTexture(size: number): THREE.Texture {
   const canvas = document.createElement('canvas');
@@ -67,6 +85,7 @@ function makeCloudTexture(size: number): THREE.Texture {
   const img = ctx.createImageData(size, size);
   const data = img.data;
 
+  // Seeded PRNG so the cloud shape is deterministic across reloads.
   let s = 0x9e3779b1;
   const rnd = () => {
     s = (s + 0x6d2b79f5) >>> 0;
@@ -76,42 +95,56 @@ function makeCloudTexture(size: number): THREE.Texture {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 
-  const N = 32;
-  const noise: number[] = [];
-  for (let i = 0; i < N * N; i++) noise.push(rnd());
-  const sample = (u: number, v: number) => {
-    const x = u * (N - 1);
-    const y = v * (N - 1);
-    const x0 = Math.floor(x);
-    const y0 = Math.floor(y);
-    const fx = x - x0;
-    const fy = y - y0;
-    const x1 = Math.min(N - 1, x0 + 1);
-    const y1 = Math.min(N - 1, y0 + 1);
-    const a = noise[y0 * N + x0];
-    const b = noise[y0 * N + x1];
-    const c = noise[y1 * N + x0];
-    const d2 = noise[y1 * N + x1];
-    const sx = fx * fx * (3 - 2 * fx);
-    const sy = fy * fy * (3 - 2 * fy);
-    return (
-      a * (1 - sx) * (1 - sy) +
-      b * sx * (1 - sy) +
-      c * (1 - sx) * sy +
-      d2 * sx * sy
-    );
+  // Build N independent noise octaves. Each octave is its own grid
+  // (so they cannot repeat) at progressively finer resolution.
+  const makeOctave = (N: number) => {
+    const grid = new Float32Array(N * N);
+    for (let i = 0; i < N * N; i++) grid[i] = rnd();
+    return (u: number, v: number) => {
+      const x = u * (N - 1);
+      const y = v * (N - 1);
+      const x0 = Math.floor(x);
+      const y0 = Math.floor(y);
+      const fx = x - x0;
+      const fy = y - y0;
+      const x1 = Math.min(N - 1, x0 + 1);
+      const y1 = Math.min(N - 1, y0 + 1);
+      const a = grid[y0 * N + x0];
+      const b = grid[y0 * N + x1];
+      const c = grid[y1 * N + x0];
+      const d = grid[y1 * N + x1];
+      // Smoothstep in both axes: derivative-continuous, no grid lines.
+      const sx = fx * fx * (3 - 2 * fx);
+      const sy = fy * fy * (3 - 2 * fy);
+      return (
+        a * (1 - sx) * (1 - sy) +
+        b * sx * (1 - sy) +
+        c * (1 - sx) * sy +
+        d * sx * sy
+      );
+    };
   };
+
+  const oct1 = makeOctave(48); //   broad shape (~48 cells)
+  const oct2 = makeOctave(128); //  mid detail
+  const oct3 = makeOctave(256); //  fine detail (texture-sized cells)
+
+  // Falloff constant: e^-(d*k)^2 reaches ~0.05 by d=1.2, ~0.005 by 1.5.
+  // Tuned so the edge is invisible but the cloud still has body to d~1.0.
+  const k = 1.35;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const dx = (x - cx) / cx;
       const dy = (y - cx) / cx;
-      const d = Math.sqrt(dx * dx + dy * dy);
+      const d2 = dx * dx + dy * dy;
+      // True gaussian falloff. No Math.max, no power curve, no boundary.
+      const edgeFade = Math.exp(-(k * k) * d2);
       const n =
-        sample(x / size, y / size) * 0.65 +
-        sample((x * 2.3) / size, (y * 2.3) / size) * 0.35;
-      const radial = Math.max(0, 1 - d);
-      const a = Math.pow(radial, 1.3) * Math.pow(n, 1.4);
+        oct1(x / size, y / size) * 0.55 +
+        oct2(x / size, y / size) * 0.30 +
+        oct3(x / size, y / size) * 0.15;
+      const a = edgeFade * n;
       const i = (y * size + x) * 4;
       data[i] = 255;
       data[i + 1] = 255;
@@ -122,6 +155,12 @@ function makeCloudTexture(size: number): THREE.Texture {
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  // Trilinear filtering + max anisotropy so stretched/distant sprites
+  // sample smoothly instead of aliasing into visible bands.
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
 }
@@ -266,9 +305,12 @@ function DustField({
  * far enough that the scene goes empty.
  */
 export function StarFieldHero() {
+  // 512px gives the 256-cell octave room to actually resolve. The
+  // texture is created once on mount and lives for the page lifetime,
+  // so the extra ~750KB is paid once and never again.
   const textures = useMemo(
     () => ({
-      cloud: makeCloudTexture(256),
+      cloud: makeCloudTexture(512),
       dust: makeRadialTexture(32, 2.0),
     }),
     []
