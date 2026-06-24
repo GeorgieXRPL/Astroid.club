@@ -1,0 +1,61 @@
+# Keep the build context tight so docker builds are fast and reproducible.
+# Anything that doesn't need to land inside the image goes here.
+
+# dependency trees
+node_modules/
+**/node_modules/
+
+# local toolchain (self-contained node install; never ships in the image)
+.node/
+
+# build output
+dist/
+**/dist/
+.next/
+out/
+
+# tests / quality / cache
+coverage/
+.vitest/
+*.tsbuildinfo
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# env / secrets — Fly secrets are injected at runtime, never via image
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+logs/
+
+# git metadata
+.git/
+.gitignore
+.gitattributes
+.editorconfig
+
+# docs that don't ship with the runtime
+docs/
+README.md
+*.md
+
+# the shell is deployed separately via Vercel; not in this image.
+# We need shell/package.json (the manifest only, not the source) so the
+# root npm install can resolve the workspaces declaration without
+# `--workspaces=false` validation tripping. Negation is order-sensitive:
+# the `!` line MUST come after the `shell/` exclude.
+shell/
+!shell/package.json
+
+# vite cache (kept for the shell, not the gateway)
+.vite/
+
+# the vendored engine tarball IS needed for the build, so it's NOT excluded.
+# vendor/ is intentionally absent from this list.

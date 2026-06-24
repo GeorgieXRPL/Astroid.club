@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.next
+shell/.next
+arena/dist
+*.log
+*.lock
+package-lock.json

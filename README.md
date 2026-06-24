@@ -1,87 +1,171 @@
-# Astroid Club
+# astroid.club
 
-> The community home for `$ASTROID` holders. Coming soon.
+The utility hub for `$ASTROID` holders. PvP / PvE asteroid-mining arena, poker freerolls, and free collectibles. Built on the [`game-engine-enhanced`](../game-engine-enhanced) engine and a battle-tested raid economy ported from `Black-Gold-main`.
 
-Live at **[astroid.club](https://astroid.club)** (once DNS is pointed).
+> **Status: Private. Not licensed for redistribution.** Part of the Saltaire Protocol stack.
+
+---
 
 ## What this is
 
-Astroid Club sits alongside the mission site in the Astroid family:
+This repository implements `astroid.club` — the product surface that sits beside `astroid.space` (the token). Per the architecture decision in [`../astroid-proposal/VC_PROPOSAL.md`](../astroid-proposal/VC_PROPOSAL.md):
 
-| Surface | Domain | Audience | Status |
-| --- | --- | --- | --- |
-| Mission site | `astroid.space` | Anyone (charity-first, kid-safe) | Live |
-| The Club | `astroid.club` | `$ASTROID` token holders | This repo · coming-soon page only |
+- `astroid.space` hosts only the token. No promised utility, yield, or services.
+- `astroid.club` (this repo) hosts every product surface: free NFT mints, the PvP/PvE arena, poker freerolls, and hold-time benefits.
 
-This repo contains a single-page coming-soon landing site. There is no waitlist form yet, no email capture, no wallet connect, no API. When the waitlist actually opens we will layer those in as a follow-up.
+The split is the load-bearing decision. See [`../astroid-proposal/LEGAL_SUMMARY.md`](../astroid-proposal/LEGAL_SUMMARY.md) for the regulatory rationale.
 
-## Compliance guardrails (please read before editing copy)
+---
 
-The Club sits closer to investment-talk territory than `astroid.space` does, by virtue of being for token holders. To keep the project safe, every user-facing string lives in [`app/lib/branding.ts`](app/lib/branding.ts), and the rules at the top of that file are not optional:
+## What's built
 
-1. No price talk. No "moon", no "100x", no implied future token value.
-2. No promises to holders. "Holders are invited" is fine. "Holders will receive X" is not.
-3. No St. Jude / ALSAC mentions on this domain. Charity messaging lives at `astroid.space/charity`. Footer link to `astroid.space` is fine; co-branding with the hospital is not.
-4. No financial advice, ever.
-5. The waitlist is "opening soon". No fake form, no fake countdown, no email capture in v1.
+| Slice                     | Status     | Coverage                                                                   |
+| ------------------------- | ---------- | -------------------------------------------------------------------------- |
+| Game economy port         | ✅ Landed  | 12 modules ported from BG (asteroid registry, raids, expeditions, etc.)    |
+| Anti-cheat                | ✅ Landed  | Rate limits, sybil detection, per-IP connection caps                       |
+| Server entrypoint         | ✅ Landed  | `WSGateway` + `WalletVerifier` + zod protocol + HTTP health probe          |
+| `CHAIN_ENABLED` switch    | ✅ Landed  | Three-layer kill switch (env flag → orchestrator gate → `ChainOps` facade) |
+| Holder verification       | ✅ Landed  | Read-only Helius/RPC reads + flash-loan mitigation tracker                 |
+| `verify_holder` wire path | ✅ Landed  | Binary eligibility envelope post-auth; landing gate consumes it            |
+| Test parity               | ✅ Landed  | 597 tests (game formulas, simulations, gateway, chain ops, holder)         |
+| Next.js shell             | ✅ Landed  | Landing / sign-in / arena / console with holder-gated club view            |
+| 3D arena                  | ✅ Landed  | 20 asteroids · 4 sectors · ~1500 instanced background belt · ACES + bloom  |
+| Privy wallet sign-in      | ✅ Landed  | External Solana wallets only; dev-keypair fallback when app id is unset    |
+| Yield SPL transfer        | ⏳ Pending | `executeYieldPayout` impl behind `ChainOps` (`chain_yield_sink` slice)     |
+| Bet escrow on-chain       | ⏳ Pending | `buildBetEscrowDeposit` / `verifyBetEscrowDeposit` (`chain_bet_escrow`)    |
+| Buyback                   | ⏳ Pending | `executeBuyback` (`chain_buyback` slice)                                   |
 
-A compliance review of this site is a single-file diff of [`app/lib/branding.ts`](app/lib/branding.ts).
+See [`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md) for the running log of every file ported, with rationale and divergences. See [`docs/CHAIN_AUDIT.md`](docs/CHAIN_AUDIT.md) for the operator-facing audit of every chain side effect and which gating layer protects it.
 
-## Tech stack
+---
 
-- **Next.js 16** (App Router) + **React 19** + **TypeScript** strict mode
-- **Tailwind CSS 4** with theme variables lifted from `astroid.space` so the family reads as one visual system
-- **No** `react-three-fiber`, **no** Solana SDK, **no** Supabase in v1 - the page is fully static. The CSS-gradient starfield in [`app/globals.css`](app/globals.css) is the same recipe `.space` uses as a base layer.
+## Heritage
 
-## Getting started
+The economy is a port of the `Black-Gold` raid system, rethemed for an asteroid-mining setting. The math, anti-cheat, holder verification, and escrow patterns are battle-tested in production at `../Black-Gold-main`. We ported the **logic**, renamed the **domain entities** to a galaxy theme, and gated the **on-chain side effects** behind a feature flag so the platform can run as a free pre-launch utility while counsel reviews the structure.
+
+The theme transformation is documented in [`docs/GLOSSARY.md`](docs/GLOSSARY.md). Read that before touching code so the renames make sense.
+
+---
+
+## Layout
+
+```
+astroid-club/
+  package.json         # private workspace root
+  tsconfig.json        # strict TS, ESM
+  eslint.config.mjs    # mirrors engine's flat config
+  .env.example         # CHAIN_ENABLED=false by default
+
+  server/
+    config/
+      runtime.ts          # one-shot env parse; chainEnabled, RPC, mint, ports
+    game/
+      types.ts            # STAKE_TIERS, formulas (calculateAttackPower, …)
+      world.ts            # GameWorld composition root (12 modules)
+      asteroid-registry.ts
+      stake-manager.ts
+      cooldowns.ts
+      expedition-tracker.ts
+      raid-engine.ts
+      bet-escrow.ts
+      refinery-manager.ts
+      distribution-service.ts
+      yield-orchestrator.ts
+      syndicate-manager.ts
+      syndicate-raids.ts
+      interfaces.ts       # narrow DI interfaces (no module-level singletons)
+    verification/
+      anti-cheat.ts       # per-wallet rate limits, sybil detection
+      holder-tracker.ts   # in-memory flash-loan-mitigation eligibility brain
+    chain/
+      index.ts            # ChainOps facade (single chokepoint for all chain ops)
+      holder.ts           # SolanaBalanceReader + HolderChainAdapter (read-only)
+    net/
+      protocol.ts         # zod-validated wire protocol (extends engine's)
+      gateway.ts          # mounts GameWorld behind engine's WSGateway
+    index.ts              # entrypoint; HTTP health, gateway start, graceful shutdown
+
+  config/
+    asteroids.ts          # AsteroidDefinition shape; resource taxonomy
+
+  tests/                  # 590 tests across 19 files
+    game/                 # per-module unit tests + scenarios.test.ts (BG-parity)
+    verification/         # anti-cheat + holder-tracker
+    chain/                # ChainOps facade + holder adapter
+    net/                  # protocol + gateway integration
+
+  docs/
+    GLOSSARY.md           # canonical theme transformation table
+    ARCHITECTURE.md       # as-built architecture
+    GAME_DESIGN.md        # player-facing mechanics reference
+    PORTING_NOTES.md      # running log of files ported from BG
+    CHAIN_AUDIT.md        # operator-facing chain-effect audit
+
+  shell/                  # Next.js 15 shell — landing (holder gate), sign-in,
+                          #   arena (3D), and the test console. Privy + dev
+                          #   keypair wallet sources both supported.
+  arena/                  # Vite scaffold reserved for the standalone arena
+                          #   build; the shell currently embeds the 3D arena
+                          #   directly via dynamic import.
+```
+
+---
+
+## Quick start
+
+> **Prereq:** the engine must be built once. From the workspace root:
+>
+> ```bash
+> cd ../game-engine-enhanced && npm install && npm run build:lib
+> cd ../astroid-club
+> ```
 
 ```bash
+# install (root + workspaces)
 npm install
-npm run dev
+
+# typecheck + lint + tests (server)
+npm run typecheck
+npm run lint
+npm test               # 597 server tests across 20 files
+
+# run the gateway (HTTP + WS on PORT, default 3002)
+npm run dev:server
+
+# run the Next.js shell (landing, sign-in, arena, console) on :3000
+npm run dev:shell
+
+# health probe
+curl http://localhost:3002/health
 ```
 
-Open <http://localhost:3000>.
+The shell respects `NEXT_PUBLIC_PRIVY_APP_ID` (Privy mode) vs unset (dev-keypair mode). Both modes drive the same auth handshake against the gateway. See `.env.example` for the full set of vars.
 
-No environment variables are required for v1. See [`.env.example`](.env.example) for the variables we will need when the waitlist opens.
+---
 
-## Files
+## Chain posture
 
-```
-app/
-  globals.css         CSS theme + starfield (synced with astroid.space)
-  layout.tsx          Root layout, fonts, metadata, OG tags
-  page.tsx            The single landing page (header, hero, teases,
-                      waitlist tease, family strip, footer - all inline)
-  lib/
-    branding.ts       Single source of truth for every user-facing string
-proxy.ts              Security headers (HSTS, CSP, COOP, CORP, X-Frame, etc.)
-next.config.ts        reactStrictMode, poweredByHeader off, Turbopack root pin
-```
+`CHAIN_ENABLED=false` by default. With the flag off:
 
-## Deploy
+- Game logic executes normally — raids resolve, asteroids accumulate yield, leaderboards update.
+- All on-chain side effects (escrow deposits, reward transfers, buybacks, holder reads) become no-ops returning a `disabled` sentinel via the `ChainOps` facade. See [`docs/CHAIN_AUDIT.md`](docs/CHAIN_AUDIT.md).
+- Holder verification short-circuits at the facade layer — no RPC traffic, no balance reads.
 
-We host the family on Vercel and use Cloudflare for DNS. To put this site on `astroid.club`:
+When counsel signs off on the structure, flip `CHAIN_ENABLED=true` per environment to wire the transfers live. The flag is enforced in three independent layers (env flag → orchestrator gate → `ChainOps` facade); flipping it is the only code-free change required.
 
-1. Create a new Vercel project from this repo. Framework preset: Next.js. No env vars needed for v1.
-2. In Vercel, add the custom domain `astroid.club` (and optionally `www.astroid.club`).
-3. In Cloudflare DNS for `astroid.club`:
-   - Apex `astroid.club` → CNAME to `cname.vercel-dns.com` (Cloudflare allows CNAME flattening at apex), or use Vercel's recommended A record set.
-   - `www` → CNAME to `cname.vercel-dns.com`.
-   - Set both records to **DNS only** (grey cloud) for the initial cert provisioning. After Vercel issues the certificate, you can flip to **Proxied** (orange cloud) if you want Cloudflare features in front of it - but check that the CSP in `proxy.ts` is still happy with whatever you enable.
-4. Push to `main`. Vercel auto-deploys.
+---
 
-## When the waitlist opens
+## Source repos this depends on
 
-That's a follow-up. The plan is:
+| Repo                                                 | Role                                                            | License                                      |
+| ---------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------- |
+| [`../game-engine-enhanced`](../game-engine-enhanced) | Engine, ECS, renderer, ws gateway, zod protocol, Solana adapter | MIT                                          |
+| [`../Black-Gold-main`](../Black-Gold-main)           | Reference for ported game-economy logic                         | Read-only — we port from it, never modify it |
 
-- Add a `WaitlistForm` client component to replace the static `WaitlistTease` panel in [`app/page.tsx`](app/page.tsx).
-- Add `app/api/waitlist/join/route.ts` with Zod validation, honeypot, per-IP rate limit.
-- Add a `club_waitlist` table in a new (isolated) Supabase project, with RLS enabled and no public policies.
-- Optional: paste-an-address Solana balance check via `@solana/web3.js` to badge entries as `verified_holder = true`. Read-only, no signing, no custody - this stays a "thanks for being a holder" badge, not a contractual benefit.
-- Loosen `connect-src` in [`proxy.ts`](proxy.ts) accordingly.
+---
 
-None of that ships in v1.
+## Branding
 
-## License
+Built and maintained by [@HeartOfMidgar](https://x.com/HeartOfMidgar) as part of the **Saltaire Protocol** stack.
 
-All rights reserved.
+This is not the engine. This is the product. The engine is open-source MIT; this product is private. Keep them separate when committing, deploying, or sharing artifacts.

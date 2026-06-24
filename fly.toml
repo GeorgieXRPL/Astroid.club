@@ -1,0 +1,106 @@
+# fly.toml — astroid.club gateway (preview tier)
+#
+# This file is what `fly deploy` reads. Override `app` at first launch
+# (`fly launch --copy-config`) so the name matches your Fly account.
+#
+# Region pinning is intentional: keep the gateway close to the bulk of
+# the holder base. `syd` (Sydney) is a good default for an NZ-operated
+# preview; switch to `iad` / `sjc` / `fra` if your audience tilts that
+# way.
+#
+# Scale up with `fly scale count 2 --region syd` once you're past
+# preview; the in-memory anti-cheat / holder tracker is per-instance, so
+# multi-region needs a sticky-session story or an external tracker.
+
+app = "astroid-club-gw"
+primary_region = "syd"
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3002"
+  # Defaults that are safe to live in repo. Real secrets (RPC URL with
+  # API key, treasury key, Privy id, etc.) are injected via `fly secrets set`.
+  CHAIN_ENABLED = "true"
+  # Public on-chain $ASTROID mint — safe to commit (it's not a secret) and
+  # required at boot when CHAIN_ENABLED=true. Decimals match the mint.
+  ASTROID_MINT_ADDRESS = "8NwtzwGm4CV8Hm4fJXR69ac1MxDYuSaN3A9HVyikpump"
+  ASTROID_DECIMALS = "6"
+  HOLDER_PREWARM_ENABLED = "true"
+  HOLDER_PREWARM_MAX_LOOKBACK = "100"
+
+  # -- emission governor (reserve protection) --------------------------------
+  # Bounds token issuance so mining can't outrun the treasury. Two guards:
+  #   1. EMISSION_DAILY_CAP — hard ceiling on credits issued per rolling 24h.
+  #      The active runaway guard during the test phase.
+  #   2. EMISSION_BUDGET — max OUTSTANDING liability (current sum of unredeemed
+  #      pending credits across ALL wallets) before issuance tapers to 0.
+  #      Recirculation-aware: claiming/redeeming/spending credits frees headroom
+  #      back up. This starter value keeps the taper armed without choking
+  #      testing while wallets hold multi-million pending balances.
+  # TODO(before public launch): size EMISSION_BUDGET to your real funded IOU
+  # backing and lower EMISSION_DAILY_CAP to the intended steady-state rate.
+  EMISSION_BUDGET = "500000000"
+  EMISSION_DAILY_CAP = "1000000"
+  EMISSION_TAPER_FRACTION = "0.25"
+
+  # -- anti-spoof drill-power bound -------------------------------------------
+  # Drill power is self-reported (no proof-of-work). Clamp the reported base to
+  # DRILL_BASE_FREE + stake x DRILL_BASE_PER_STAKE before the tier multiplier so
+  # a wallet can't claim the 10M hard cap with little/no stake. Default-on in
+  # code; pinned here for visibility/tunability. Set DRILL_STAKE_BOUND=off to
+  # disable.
+  DRILL_STAKE_BOUND = "on"
+  DRILL_BASE_FREE = "5000"
+  DRILL_BASE_PER_STAKE = "1"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3002
+  auto_stop_machines = "off"   # WS connections die if the machine sleeps
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "20s"
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
+    tls_skip_verify = false
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 3002
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/health"
+
+# VM sizing: the gateway is light (an in-memory ECS world + WS). Start
+# small; scale CPU before RAM if the tick loop saturates.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

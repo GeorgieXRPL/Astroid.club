@@ -1,34 +1,74 @@
 {
-  "name": "astroid-club",
+  "name": "@saltaire/astroid-club",
   "version": "0.1.0",
   "private": true,
-  "description": "Astroid Club - the community home for $ASTROID holders. Coming soon.",
+  "description": "astroid.club — utility hub for $ASTROID holders. PvP/PvE asteroid-mining arena, poker freerolls, and free collectibles. Built on game-engine-enhanced and a battle-tested raid economy ported from Black-Gold.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "shell",
+    "arena"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "dev:server": "tsx watch server/index.ts",
+    "dev:shell": "npm run dev --workspace=@saltaire/astroid-club-shell",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:shell": "npm run build --workspace=@saltaire/astroid-club-shell",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:shell": "npm run typecheck --workspace=@saltaire/astroid-club-shell",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:shell": "npm run lint --workspace=@saltaire/astroid-club-shell",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "engine:pack": "node scripts/pack-engine.mjs"
+  },
+  "author": "HeartOfMidgar (Saltaire Protocol)",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/HeartOfMidgar/Astroid-miner",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HeartOfMidgar/Astroid-miner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HeartOfMidgar/Astroid-miner/issues"
   },
   "dependencies": {
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.0",
-    "@react-three/postprocessing": "^3.0.4",
-    "next": "^16.2.4",
-    "postprocessing": "^6.39.1",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "three": "^0.184.0"
+    "@quarryprotocol/quarry-sdk": "^5.3.0",
+    "@saberhq/solana-contrib": "^1.15.0",
+    "@saberhq/token-utils": "^1.15.0",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "game-engine-enhanced": "file:./vendor/game-engine-enhanced.tgz",
+    "ioredis": "^5.11.0",
+    "pg": "^8.21.0",
+    "tweetnacl": "^1.0.3",
+    "uuid": "^11.0.5",
+    "ws": "^8.19.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@types/three": "^0.184.0",
-    "eslint": "^9",
-    "eslint-config-next": "16.1.1",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.20.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-import": "^2.31.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^3.0.4"
   }
 }

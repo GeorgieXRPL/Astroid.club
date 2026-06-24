@@ -1,38 +1,64 @@
 # dependencies
 node_modules/
-.pnp
-.pnp.js
+**/node_modules/
+
+# local toolchain (self-contained node install)
+.node/
 
 # build output
+dist/
+**/dist/
 .next/
 out/
-build/
-dist/
-*.tsbuildinfo
-next-env.d.ts
 
-# environment
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# test output
+coverage/
+.vitest/
 
 # editor / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+*.swp
 
-# vercel
-.vercel
+# env / secrets
+.env
+.env.*
+!.env.example
 
-# transient commit-message scratch (Windows shells lack heredocs)
-COMMIT_MSG.tmp
+# ad-hoc secret/deploy scripts (e.g. `fly secrets set ...` with plaintext keys).
+# Keep these OUT of the repo — set secrets via `fly secrets set` directly.
+Untitled-*
+*secrets*.sh
+*-secret*.sh
+fly-secrets*.sh
+set-secrets*.sh
 
+# wallet keypairs & private keys — NEVER commit (devnet or mainnet)
+.keys/
+secrets/
+wallets/
+*.keypair.json
+*-keypair.json
+*.wallet.json
+keypair*.json
+id.json
+*.pem
+*.key
+*.privatekey
+
+# solana localnet / anchor artifacts
+test-ledger/
+.anchor/
+ledger/
+
+# logs
+*.log
+logs/
+
+# vite cache
+.vite/
+
+# typescript build cache
+*.tsbuildinfo

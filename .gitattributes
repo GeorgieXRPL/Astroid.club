@@ -1,0 +1,19 @@
+# Normalize all text files to LF in the repo regardless of platform.
+* text=auto eol=lf
+
+# Treat known binaries explicitly.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.mp3  binary
+*.ogg  binary
+*.wav  binary
+*.glb  binary
+*.gltf binary
