@@ -63,7 +63,7 @@ export const metadata: Metadata = {
     title: 'astroid.club | for holders of $ASTROID',
     description:
       'A members-only space for holders of $ASTROID. Mining arena, in-world events, cosmetic drops, community lounge. Holders only.',
-    creator: '@HeartOfMidgar',
+    creator: '@GeorgieSaltaire',
   },
   robots: {
     index: true,
@@ -152,12 +152,12 @@ function LayoutChrome({ children }: { children: ReactNode }) {
                 <li>
                   <a
                     className="inline-flex items-center gap-2 text-white/65 transition-colors hover:text-cosmos"
-                    href="https://x.com/HeartOfMidgar"
+                    href="https://x.com/GeorgieSaltaire"
                     rel="noreferrer"
                     target="_blank"
                   >
                     <XIcon />
-                    <span>X / @HeartOfMidgar</span>
+                    <span>X / @GeorgieSaltaire</span>
                   </a>
                 </li>
                 <li>
@@ -202,11 +202,11 @@ function LayoutChrome({ children }: { children: ReactNode }) {
                 built by{' '}
                 <a
                   className="text-white/55 underline-offset-2 transition-colors hover:text-cosmos hover:underline"
-                  href="https://x.com/HeartOfMidgar"
+                  href="https://x.com/GeorgieSaltaire"
                   rel="noreferrer"
                   target="_blank"
                 >
-                  @HeartOfMidgar
+                  @GeorgieSaltaire
                 </a>
               </span>
             </span>
