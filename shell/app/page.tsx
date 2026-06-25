@@ -46,7 +46,12 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { ComingSoon } from '@/components/landing/ComingSoon';
 import { ARENA_OPEN } from '@/lib/features';
-import { SessionError, type ConnectSnapshot, type HolderEligibilityReason } from '@/lib/session';
+import {
+  SessionError,
+  type ConnectSnapshot,
+  type HolderEligibility,
+  type HolderEligibilityReason,
+} from '@/lib/session';
 import { connect, disconnect, useSession } from '@/lib/use-session';
 import { useWalletSource } from '@/lib/wallet-source-providers';
 
@@ -89,7 +94,7 @@ type HolderStatus =
   | { state: 'idle' }
   | { state: 'pending' }
   | { state: 'eligible'; reason: HolderEligibilityReason; message: string }
-  | { state: 'not_eligible'; message: string }
+  | { state: 'not_eligible'; message: string; remainingHoldMs?: number }
   | { state: 'error'; code: string; message: string };
 
 export default function Home() {
@@ -117,6 +122,22 @@ function ClubApp() {
   // socket close), reset to `idle` so the next sign-in triggers a
   // fresh check rather than reusing a stale answer.
   const sess = session.state === 'connected' ? session.session : null;
+
+  // Single source of truth for resolving a `verify_holder` result into
+  // the holder state machine. Shared by the auto-check effect and the
+  // manual "check again" the countdown fires when its window elapses.
+  const applyVerify = useCallback((result: HolderEligibility) => {
+    if (result.eligible) {
+      setHolder({ state: 'eligible', reason: result.reason, message: result.message });
+    } else {
+      setHolder({
+        state: 'not_eligible',
+        message: result.message,
+        remainingHoldMs: result.remainingHoldMs,
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!sess) {
       setHolder({ state: 'idle' });
@@ -127,15 +148,7 @@ function ClubApp() {
     sess.verifyHolder().then(
       (result) => {
         if (cancelled) return;
-        if (result.eligible) {
-          setHolder({
-            state: 'eligible',
-            reason: result.reason,
-            message: result.message,
-          });
-        } else {
-          setHolder({ state: 'not_eligible', message: result.message });
-        }
+        applyVerify(result);
       },
       (err) => {
         if (cancelled) return;
@@ -147,7 +160,19 @@ function ClubApp() {
     return () => {
       cancelled = true;
     };
-  }, [sess]);
+  }, [sess, applyVerify]);
+
+  // Re-run the holder check on demand (the countdown calls this once it
+  // reaches zero so a new holder slides straight into the Club).
+  const recheck = useCallback(() => {
+    if (!sess) return;
+    setHolder({ state: 'pending' });
+    sess.verifyHolder().then(applyVerify, (err) => {
+      const code = err instanceof SessionError ? err.code : 'unknown';
+      const msg = err instanceof Error ? err.message : String(err);
+      setHolder({ state: 'error', code, message: msg });
+    });
+  }, [sess, applyVerify]);
 
   if (sess && session.snapshot && holder.state === 'eligible') {
     return (
@@ -163,6 +188,8 @@ function ClubApp() {
         <NotEligible
           walletAddress={session.snapshot?.walletAddress ?? ''}
           message={holder.message}
+          remainingHoldMs={holder.remainingHoldMs}
+          onRecheck={recheck}
         />
       </div>
     );
@@ -381,12 +408,27 @@ function WelcomeBanner({
  *
  * The user can sign out from here to try a different wallet.
  */
-function NotEligible({ walletAddress, message }: { walletAddress: string; message: string }) {
+function NotEligible({
+  walletAddress,
+  message,
+  remainingHoldMs,
+  onRecheck,
+}: {
+  walletAddress: string;
+  message: string;
+  remainingHoldMs?: number;
+  onRecheck: () => void;
+}) {
   const wallet = useWalletSource();
   const onSignOut = useCallback(async () => {
     disconnect();
     await wallet.disconnectWallet();
   }, [wallet]);
+
+  // A positive `remainingHoldMs` means the wallet holds enough $ASTROID
+  // but is still inside the hold-time window: show a live countdown
+  // instead of the generic "not a holder" copy.
+  const inHoldWindow = typeof remainingHoldMs === 'number' && remainingHoldMs > 0;
 
   return (
     <section className="relative mx-auto flex min-h-[calc(100vh-180px)] max-w-3xl flex-col items-center justify-center px-6 py-16 text-center sm:px-8">
@@ -396,16 +438,33 @@ function NotEligible({ walletAddress, message }: { walletAddress: string; messag
         <span className="holder-chip">Holders only</span>
       </div>
 
-      <p className="eyebrow mb-5">Verification did not pass</p>
-      <h1 className="mb-5 font-display text-5xl font-bold leading-[0.95] tracking-tight text-white sm:text-6xl">
-        Not yet, traveller.
-      </h1>
-      <p className="mb-3 max-w-xl text-base leading-relaxed text-white/70 sm:text-lg">{message}</p>
-      <p className="mb-8 max-w-xl text-sm leading-relaxed text-white/45">
-        The Club gate is read-only. We never moved or touched any tokens. If you topped up after
-        signing in, the gate has a hold-time window before it re-counts; come back in a little while
-        or pick a different wallet.
-      </p>
+      {inHoldWindow ? (
+        <>
+          <p className="eyebrow mb-5">Holder verified &middot; hold window</p>
+          <h1 className="mb-5 font-display text-5xl font-bold leading-[0.95] tracking-tight text-white sm:text-6xl">
+            Almost in, traveller.
+          </h1>
+          <p className="mb-8 max-w-xl text-base leading-relaxed text-white/70 sm:text-lg">
+            {message}
+          </p>
+          <HoldCountdown remainingMs={remainingHoldMs!} onComplete={onRecheck} />
+        </>
+      ) : (
+        <>
+          <p className="eyebrow mb-5">Verification did not pass</p>
+          <h1 className="mb-5 font-display text-5xl font-bold leading-[0.95] tracking-tight text-white sm:text-6xl">
+            Not yet, traveller.
+          </h1>
+          <p className="mb-3 max-w-xl text-base leading-relaxed text-white/70 sm:text-lg">
+            {message}
+          </p>
+          <p className="mb-8 max-w-xl text-sm leading-relaxed text-white/45">
+            The Club gate is read-only. We never moved or touched any tokens. If you topped up after
+            signing in, the gate has a hold-time window before it re-counts; come back in a little
+            while or pick a different wallet.
+          </p>
+        </>
+      )}
 
       {walletAddress && (
         <div className="mb-8 inline-flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.03] px-4 py-2 font-mono text-xs text-white/65">
@@ -428,6 +487,63 @@ function NotEligible({ walletAddress, message }: { walletAddress: string; messag
         </Link>
       </div>
     </section>
+  );
+}
+
+/**
+ * Live countdown to arena access for a new holder inside the hold-time
+ * window. Anchors a target wall-clock instant from the server's
+ * `remainingMs` (measured at verify time) and ticks once a second so a
+ * brief render delay never makes the timer lie. When it reaches zero it
+ * fires `onComplete` once (the parent re-runs `verify_holder`) and shows
+ * a manual "Check access now" affordance as a fallback.
+ */
+function HoldCountdown({ remainingMs, onComplete }: { remainingMs: number; onComplete: () => void }) {
+  // Anchor on mount; ignore later prop changes so the target instant is
+  // stable across re-renders. A fresh verify remounts this component.
+  const [target] = useState(() => Date.now() + remainingMs);
+  const [now, setNow] = useState(() => Date.now());
+  const [fired, setFired] = useState(false);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const leftMs = Math.max(0, target - now);
+  const done = leftMs <= 0;
+
+  useEffect(() => {
+    if (done && !fired) {
+      setFired(true);
+      onComplete();
+    }
+  }, [done, fired, onComplete]);
+
+  const totalSeconds = Math.ceil(leftMs / 1000);
+  const mm = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+  const ss = String(totalSeconds % 60).padStart(2, '0');
+
+  return (
+    <div className="mb-8 flex flex-col items-center gap-4">
+      {done ? (
+        <button className="btn-primary px-6 py-3" onClick={onComplete} type="button">
+          Check access now
+        </button>
+      ) : (
+        <>
+          <div
+            aria-live="polite"
+            className="rounded-xl border border-cyan-400/25 bg-cyan-400/[0.06] px-7 py-4 font-mono text-4xl font-semibold tracking-[0.18em] text-cyan-200 tabular-nums sm:text-5xl"
+          >
+            {mm}:{ss}
+          </div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-white/45">
+            Arena access unlocks automatically
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 

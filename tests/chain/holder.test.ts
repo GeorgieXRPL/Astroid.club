@@ -212,7 +212,7 @@ describe('HolderChainAdapter.getHolderBalance: cache', () => {
 describe('HolderChainAdapter.verifyHolderQualified', () => {
   it('returns false on first observation (flash-loan guard active)', async () => {
     const { adapter } = makeAdapter({ balances: new Map([[ALICE, 250]]) });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
   });
 
   it('returns false when balance is below required', async () => {
@@ -220,7 +220,7 @@ describe('HolderChainAdapter.verifyHolderQualified', () => {
       balances: new Map([[ALICE, 50]]),
       requiredBalance: 100,
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
   });
 
   it('returns true once the time gate passes', async () => {
@@ -230,9 +230,9 @@ describe('HolderChainAdapter.verifyHolderQualified', () => {
       minConsecutiveObservations: 50,
       cacheTtlMs: 0, // ensure each call hits the reader
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
     clock.advance(600_001);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true);
   });
 
   it('returns true once the consecutive gate passes', async () => {
@@ -242,9 +242,9 @@ describe('HolderChainAdapter.verifyHolderQualified', () => {
       minConsecutiveObservations: 3,
       cacheTtlMs: 0,
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true);
   });
 
   it('returns false when balance drops below threshold (resets tracking)', async () => {
@@ -260,17 +260,17 @@ describe('HolderChainAdapter.verifyHolderQualified', () => {
     await adapter.verifyHolderQualified(ALICE);
     await adapter.verifyHolderQualified(ALICE);
     await adapter.verifyHolderQualified(ALICE);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true);
 
     // Drop balance below threshold.
     balances.set(ALICE, 50);
     clock.advance(1);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
     expect(tracker.getHistory(ALICE)).toBeUndefined();
 
     // Restore — back to first-observation state.
     balances.set(ALICE, 250);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
   });
 
   it('uses the cached balance if within TTL (no extra reader call per verify)', async () => {
@@ -313,7 +313,7 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
       logger: silentLogger,
       now: clock.now,
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true);
     expect(estimator.calls.length).toBe(1);
     expect(estimator.calls[0]?.wallet).toBe(ALICE);
   });
@@ -325,7 +325,7 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
       requiredBalance: 100,
       estimator,
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
     expect(estimator.calls.length).toBe(1);
   });
 
@@ -336,7 +336,7 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
       requiredBalance: 100,
       estimator,
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
     expect(estimator.calls.length).toBe(0);
   });
 
@@ -376,7 +376,7 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
     });
     // Estimator throws, but the adapter swallows so the verify
     // still produces a verdict (just the standard first-obs deny).
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
     expect(estimator.calls.length).toBe(1);
   });
 
@@ -404,10 +404,10 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
       logger: silentLogger,
       now: clock.now,
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true); // pre-warmed
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true); // pre-warmed
     balances.set(ALICE, 50); // dip
     clock.advance(1);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
     expect(tracker.getHistory(ALICE)).toBeUndefined();
     balances.set(ALICE, 1000); // restored
     clock.advance(1);
@@ -415,7 +415,7 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
     // same seeded answer the wallet immediately re-qualifies. The
     // attacker doesn't gain anything: the on-chain history they
     // can't fabricate is the source of truth.
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true);
     expect(estimator.calls.length).toBe(2);
   });
 
@@ -425,7 +425,7 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
       requiredBalance: 100,
       // No estimator passed.
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
   });
 });
 
@@ -459,25 +459,25 @@ describe('HolderChainAdapter.verifyHolderQualified: requiredBalanceProvider', ()
     // Balance 1.0M; pegged requirement 1.25M ⇒ below threshold ⇒ ineligible,
     // even though it is far above the static floor of 100.
     const { adapter } = makePeggedAdapter(() => 1_250_000, { balance: 1_000_000, floor: 100 });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
   });
 
   it('qualifies when the balance clears the live pegged requirement', async () => {
     const { adapter } = makePeggedAdapter(() => 1_250_000, { balance: 2_000_000, floor: 100 });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true);
   });
 
   it('falls back to the static floor when the provider returns 0 (oracle cold)', async () => {
     // Provider yields 0 (no live quote) ⇒ the 100-token floor applies, so a
     // 1.0M balance qualifies.
     const { adapter } = makePeggedAdapter(() => 0, { balance: 1_000_000, floor: 100 });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true);
   });
 
   it('falls back to the static floor when the provider returns a non-finite value', async () => {
     const { adapter } = makePeggedAdapter(() => Number.NaN, { balance: 50, floor: 100 });
     // Floor 100 applies; balance 50 < 100 ⇒ ineligible.
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false);
   });
 
   it('tracks a moving peg between verifies (token count scales with price)', async () => {
@@ -499,10 +499,56 @@ describe('HolderChainAdapter.verifyHolderQualified: requiredBalanceProvider', ()
       logger: silentLogger,
       now: clock.now,
     });
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false); // 1.5M < 2.0M
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(false); // 1.5M < 2.0M
     required = 1_000_000; // price/MC rose ⇒ fewer tokens needed
     clock.advance(1);
-    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true); // 1.5M ≥ 1.0M
+    expect((await adapter.verifyHolderQualified(ALICE)).qualified).toBe(true); // 1.5M ≥ 1.0M
+  });
+});
+
+// =============================================================================
+// verifyHolderQualified: structured result (remainingHoldMs for the countdown)
+// =============================================================================
+
+describe('HolderChainAdapter.verifyHolderQualified: result shape', () => {
+  it('reports remainingHoldMs while inside the hold window (flash_loan_guard)', async () => {
+    const { adapter } = makeAdapter({
+      balances: new Map([[ALICE, 250]]),
+      requiredBalance: 100,
+      minHoldMs: 600_000,
+      minConsecutiveObservations: 50,
+    });
+    const r = await adapter.verifyHolderQualified(ALICE);
+    expect(r.qualified).toBe(false);
+    expect(r.reason).toBe('flash_loan_guard');
+    expect(r.remainingHoldMs).toBe(600_000); // full window on first observation
+  });
+
+  it('reports 0 remaining and no reason once qualified', async () => {
+    const { adapter, clock } = makeAdapter({
+      balances: new Map([[ALICE, 250]]),
+      requiredBalance: 100,
+      minHoldMs: 600_000,
+      minConsecutiveObservations: 50,
+      cacheTtlMs: 0,
+    });
+    await adapter.verifyHolderQualified(ALICE);
+    clock.advance(600_001);
+    const r = await adapter.verifyHolderQualified(ALICE);
+    expect(r.qualified).toBe(true);
+    expect(r.remainingHoldMs).toBe(0);
+    expect(r.reason).toBeUndefined();
+  });
+
+  it('does not surface a countdown for a below-threshold wallet', async () => {
+    const { adapter } = makeAdapter({
+      balances: new Map([[ALICE, 50]]),
+      requiredBalance: 100,
+    });
+    const r = await adapter.verifyHolderQualified(ALICE);
+    expect(r.qualified).toBe(false);
+    expect(r.reason).toBe('below_threshold');
+    expect(r.remainingHoldMs).toBe(0); // buy more, not wait
   });
 });
 

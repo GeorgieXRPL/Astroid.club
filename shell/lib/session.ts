@@ -132,6 +132,12 @@ export interface HolderEligibility {
   reason: HolderEligibilityReason;
   walletAddress: string;
   message: string;
+  /**
+   * Milliseconds until the hold-time gate opens, present only when the wallet
+   * holds enough $ASTROID but is still inside the window. Drives the live
+   * countdown shown to a new holder waiting out the timer.
+   */
+  remainingHoldMs?: number;
 }
 
 /**

@@ -667,7 +667,7 @@ export class AstroidGateway {
           'Holder verification is in dev mode. All authenticated wallets are treated as eligible.',
       };
     }
-    if (result.data) {
+    if (result.data.qualified) {
       return {
         eligible: true,
         reason: 'qualified',
@@ -675,11 +675,18 @@ export class AstroidGateway {
         message: 'Holder verification passed. Welcome to the Club.',
       };
     }
+    // A new holder who clears the balance but is still inside the hold-time
+    // window gets a countdown so the UI can show "access unlocks in mm:ss".
+    // Below-threshold wallets get the generic threshold copy (no countdown).
+    const inHoldWindow = result.data.remainingHoldMs > 0;
     return {
       eligible: false,
       reason: 'not_qualified',
       walletAddress,
-      message: 'This wallet does not currently meet the holder threshold or hold-time requirement.',
+      remainingHoldMs: inHoldWindow ? result.data.remainingHoldMs : undefined,
+      message: inHoldWindow
+        ? 'You hold enough $ASTROID. Arena access unlocks after a short hold window.'
+        : 'This wallet does not currently meet the holder threshold or hold-time requirement.',
     };
   }
 

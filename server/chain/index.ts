@@ -47,6 +47,7 @@
 import type { AstroidRuntime } from '../config/runtime.js';
 import type { GameLogger } from '../game/interfaces.js';
 
+import type { HolderVerifyResult } from './holder.js';
 import type {
   BuildError,
   ClaimBuildResult,
@@ -205,7 +206,7 @@ export interface ChainOpsImplementations {
    */
   bridgeIou(walletAddress: string, amount: number): Promise<string>;
   getHolderBalance(walletAddress: string): Promise<number>;
-  verifyHolderQualified(walletAddress: string): Promise<boolean>;
+  verifyHolderQualified(walletAddress: string): Promise<HolderVerifyResult>;
   getOnChainStake(walletAddress: string): Promise<{ amount: number; lastUpdate: number }>;
   // -- Quarry staking (chain_quarry_staking) --
   buildStakeTx(walletAddress: string, amount: number): Promise<TransactionBuildResult | BuildError>;
@@ -452,7 +453,9 @@ export class ChainOps {
    * the wallet has held at least `runtime.holderMinBalance` for at
    * least `runtime.holderMinHoldSeconds`.
    */
-  async verifyHolderQualified(walletAddress: string): Promise<ChainQueryResult<boolean>> {
+  async verifyHolderQualified(
+    walletAddress: string,
+  ): Promise<ChainQueryResult<HolderVerifyResult>> {
     if (!this.chainEnabled) return disabled('verifyHolderQualified');
     const impl = this.impls.verifyHolderQualified;
     if (!impl) throw new ChainOpNotImplementedError('verifyHolderQualified', 'holder_verification');

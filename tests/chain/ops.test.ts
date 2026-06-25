@@ -245,7 +245,7 @@ describe('ChainOps with chainEnabled=true and full impls', () => {
       executeBuyback: vi.fn(async () => ({ tokensReceived: 1234, signature: 'sig-buy' })),
       bridgeIou: vi.fn(async () => 'sig-bridge'),
       getHolderBalance: vi.fn(async () => 5_000),
-      verifyHolderQualified: vi.fn(async () => true),
+      verifyHolderQualified: vi.fn(async () => ({ qualified: true, remainingHoldMs: 0 })),
       getOnChainStake: vi.fn(async () => ({ amount: 9_000, lastUpdate: 12345 })),
       buildStakeTx: vi.fn(async () => ({
         transaction: 'stake-tx-b64',
@@ -332,12 +332,12 @@ describe('ChainOps with chainEnabled=true and full impls', () => {
     if (r.ok) expect(r.data).toBe(5_000);
   });
 
-  it('verifyHolderQualified returns the impl boolean', async () => {
+  it('verifyHolderQualified returns the impl result', async () => {
     const impls = fullImpls();
     const ops = new ChainOps({ runtime: onRuntime(), logger: silentLogger, impls });
     const r = await ops.verifyHolderQualified(ALICE);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.data).toBe(true);
+    if (r.ok) expect(r.data.qualified).toBe(true);
   });
 
   it('getOnChainStake returns the impl object', async () => {
@@ -459,7 +459,7 @@ describe('ChainOps Quarry staking ops', () => {
       executeBuyback: vi.fn(async () => ({ tokensReceived: 1234, signature: 'sig-buy' })),
       bridgeIou: vi.fn(async () => 'sig-bridge'),
       getHolderBalance: vi.fn(async () => 5_000),
-      verifyHolderQualified: vi.fn(async () => true),
+      verifyHolderQualified: vi.fn(async () => ({ qualified: true, remainingHoldMs: 0 })),
       getOnChainStake: vi.fn(async () => ({ amount: 9_000, lastUpdate: 12345 })),
       buildStakeTx: vi.fn(async () => ({
         transaction: 'stake-tx-b64',

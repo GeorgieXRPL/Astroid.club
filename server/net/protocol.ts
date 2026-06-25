@@ -443,6 +443,13 @@ export interface HolderEligibilityData {
   walletAddress: string;
   /** Human-readable message safe to surface in UI. */
   message: string;
+  /**
+   * Milliseconds until the hold-time gate opens, when the wallet holds enough
+   * but is still inside the window. Present only on that branch (a new holder
+   * waiting out the timer); absent otherwise. Lets the client render a live
+   * countdown to arena access.
+   */
+  remainingHoldMs?: number;
 }
 
 // ---------- Protocol factory ----------

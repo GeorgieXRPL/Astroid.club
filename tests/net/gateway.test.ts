@@ -101,7 +101,13 @@ function makeChainOps(verifyHolderImpl: (wallet: string) => Promise<boolean>): C
     port: 0,
   };
   const impls: Partial<ChainOpsImplementations> = {
-    verifyHolderQualified: verifyHolderImpl,
+    // The fake returns a bare boolean; wrap it in the structured
+    // verify result the adapter now produces (remainingHoldMs powers
+    // the new-holder countdown, irrelevant to these gateway tests).
+    verifyHolderQualified: async (wallet) => ({
+      qualified: await verifyHolderImpl(wallet),
+      remainingHoldMs: 0,
+    }),
   };
   return new ChainOps({ runtime, impls, logger: silentLogger });
 }
@@ -552,7 +558,7 @@ describe('AstroidGateway verify_holder', () => {
     };
     const chainOps = new ChainOps({
       runtime,
-      impls: { verifyHolderQualified: async () => true },
+      impls: { verifyHolderQualified: async () => ({ qualified: true, remainingHoldMs: 0 }) },
       logger: silentLogger,
     });
     const h = await startHarness({ chainOps });
@@ -611,6 +617,51 @@ describe('AstroidGateway verify_holder', () => {
     // Sanity: the message must not echo a numeric balance, threshold,
     // or hold-seconds value — the Club gate is a binary surface.
     expect(reply.data.message).not.toMatch(/\d/);
+    sock.close();
+    await stopHarness(h);
+  });
+
+  it('surfaces remainingHoldMs for a new holder still inside the hold window', async () => {
+    // Holds enough but inside the hold-time window: the gateway should
+    // echo the countdown so the client can render "unlocks in mm:ss".
+    const runtime: AstroidRuntime = {
+      chainEnabled: true,
+      rpcUrl: 'https://api.devnet.solana.com',
+      astroidMint: 'AstroIDMintStubXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      astroidDecimals: 9,
+      holderMinBalance: 1,
+      holderMinSol: 0,
+      holderMinHoldSeconds: 600,
+      holderPrewarmEnabled: true,
+      holderPrewarmMaxLookback: 100,
+      corsAllowedOrigins: ['http://localhost:3000'],
+      walletAllowlist: [],
+      adminSecret: undefined,
+      redisUrl: undefined,
+      databaseUrl: undefined,
+      port: 0,
+    };
+    const chainOps = new ChainOps({
+      runtime,
+      impls: {
+        verifyHolderQualified: async () => ({
+          qualified: false,
+          remainingHoldMs: 420_000,
+          reason: 'flash_loan_guard',
+        }),
+      },
+      logger: silentLogger,
+    });
+    const h = await startHarness({ chainOps });
+    const { sock } = await authedSocket(h.port);
+    const reply = (await send(sock, { type: 'verify_holder' })) as {
+      type: string;
+      data: { eligible: boolean; reason: string; remainingHoldMs?: number };
+    };
+    expect(reply.type).toBe('result');
+    expect(reply.data.eligible).toBe(false);
+    expect(reply.data.reason).toBe('not_qualified');
+    expect(reply.data.remainingHoldMs).toBe(420_000);
     sock.close();
     await stopHarness(h);
   });

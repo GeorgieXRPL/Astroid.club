@@ -56,6 +56,24 @@ export interface BalanceReader {
   getTokenBalance(walletAddress: string): Promise<number>;
 }
 
+/**
+ * Structured eligibility result surfaced to the gateway (and from there to the
+ * client). Richer than a bare boolean so the UI can show a live countdown to a
+ * new holder who clears the balance but is still inside the hold-time window.
+ */
+export interface HolderVerifyResult {
+  /** Final eligibility verdict. */
+  qualified: boolean;
+  /**
+   * Milliseconds left on the hold-time gate, measured at verify time. Non-zero
+   * only when the wallet holds enough but is still inside the window
+   * (`reason === 'flash_loan_guard'`); `0` otherwise.
+   */
+  remainingHoldMs: number;
+  /** Why eligibility was denied, when `qualified === false`. */
+  reason?: 'below_threshold' | 'flash_loan_guard';
+}
+
 // ---------------------------------------------------------------------------
 // SolanaBalanceReader: production impl
 // ---------------------------------------------------------------------------
@@ -284,7 +302,7 @@ export class HolderChainAdapter {
    * first verify. Estimator failures are logged at warn and the
    * adapter falls through to the normal first-observation flow.
    */
-  async verifyHolderQualified(walletAddress: string): Promise<boolean> {
+  async verifyHolderQualified(walletAddress: string): Promise<HolderVerifyResult> {
     const balance = await this.getHolderBalance(walletAddress);
     const required = this.resolveRequiredBalance();
 
@@ -327,7 +345,13 @@ export class HolderChainAdapter {
           `(balance=${balance} required=${required})`,
       );
     }
-    return decision.eligible;
+    return {
+      qualified: decision.eligible,
+      // Only a hold-window denial yields a meaningful countdown; a
+      // below-threshold wallet needs to buy more, not wait.
+      remainingHoldMs: decision.reason === 'flash_loan_guard' ? decision.remainingHoldMs : 0,
+      reason: decision.reason,
+    };
   }
 
   /** Drop the cached balance for a single wallet. */
