@@ -215,10 +215,13 @@ export default function SignInPage() {
               </SnapshotRow>
             </dl>
             <div className="mt-6 flex flex-wrap items-center gap-3">
-              <Link className="btn-primary" href="/console">
+              <Link className="btn-primary" href="/arena">
+                Enter the arena
+              </Link>
+              <Link className="btn-secondary" href="/console">
                 Open the test console
               </Link>
-              <p className="text-xs text-white/45">
+              <p className="w-full text-xs text-white/45">
                 Your session WebSocket stays open across the route change.
               </p>
             </div>

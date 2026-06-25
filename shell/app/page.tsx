@@ -287,7 +287,7 @@ function ClubOutside({
           <span className="live-dot" aria-hidden />
           Stay close. The doors open here first.
         </span>
-        <span className="text-white/25">v0.1 dev &middot; ws://localhost:3002</span>
+        <span className="text-white/25">Beta</span>
       </div>
     </section>
   );
