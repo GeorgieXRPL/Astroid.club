@@ -30,7 +30,7 @@ export function ArenaFallback({
           </p>
           <p className="mt-1 text-xs leading-relaxed text-white/55">
             Your browser couldn&rsquo;t start a WebGL/GPU context, so the cinematic view is off. The
-            map below is fully playable — pick an asteroid to mine, stake, or raid.
+            map below is fully playable. Pick an asteroid to mine, stake, or raid.
           </p>
         </div>
 

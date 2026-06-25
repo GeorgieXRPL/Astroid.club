@@ -101,27 +101,27 @@ const STEPS: Step[] = [
   },
   {
     n: 3,
-    title: 'Start mining — get paid per discovery',
-    body: 'Click any asteroid and hit "Mine here". While you mine you contribute drill power to that rock. Each time the asteroid makes a discovery, the reward is split right then among everyone mining there, proportional to drill power × stake — so you earn as finds land instead of waiting on a periodic payout. Your rewards build up as claimable credits in your HUD.',
+    title: 'Start mining, get paid per discovery',
+    body: 'Click any asteroid and hit "Mine here". While you mine you contribute drill power to that rock. Each time the asteroid makes a discovery, the reward is split right then among everyone mining there, proportional to drill power × stake, so you earn as finds land instead of waiting on a periodic payout. Your rewards build up as claimable credits in your HUD.',
     hint: 'You can switch asteroids any time. "Leave" returns your miner to free-roam; "Mine here" on another rock relocates instantly.',
   },
   {
     n: 4,
     title: 'Stake to climb a drill tier',
-    body: 'Open the top stats panel, set an amount, and click "Stake" to lock $ASTROID through the Quarry protocol. Stake raises your drill tier — Bronze, Silver, Gold, Diamond — and each tier multiplies your effective drill power and defense. Tiers are priced in USD and re-priced against the live $ASTROID price, so the token amount for each tier adjusts automatically. The HUD shows your current tier and exactly how much more to reach the next.',
+    body: 'Open the top stats panel, set an amount, and click "Stake" to lock $ASTROID through the Quarry protocol. Stake raises your drill tier (Bronze, Silver, Gold, Diamond), and each tier multiplies your effective drill power and defense. Tiers are priced in USD and re-priced against the live $ASTROID price, so the token amount for each tier adjusts automatically. The HUD shows your current tier and exactly how much more to reach the next.',
     hint: 'Staking is non-custodial and global (not per-asteroid). Unstake any time. It is a gameplay buff, not an investment.',
   },
   {
     n: 5,
     title: 'Raid rivals, rally to defend',
-    body: 'From your home station you can raid any other asteroid for a slice of its treasury — the pot that builds up from mining and meteor deflections. Select the target, optionally add a wager (capped at 20% of your home stake, forfeited if you lose), and click "Raid". Beat the defenders and you carry off treasury; lose and your wager is burned. If you are the one under attack, "Rally" spends stake to harden your defense.',
+    body: 'From your home station you can raid any other asteroid for a slice of its treasury, the pot that builds up from mining and meteor deflections. Select the target, optionally add a wager (capped at 20% of your home stake, forfeited if you lose), and click "Raid". Beat the defenders and you carry off treasury; lose and your wager is burned. If you are the one under attack, "Rally" spends stake to harden your defense.',
     hint: 'Watch the arena HUD for an "Active raids" list and inbound-raid alerts. Newcomers should mine and stake for a while before opening this can.',
   },
   {
     n: 6,
     title: 'Deflect meteor strikes',
-    body: 'Now and then a meteor streaks toward an asteroid. If it hits, it skims a cut of that asteroid\u2019s treasury and dents its yield for a while. You can pay credits to deflect it — and the deflection cost is routed straight into the treasury, so a deflected strike actually grows the pot. The HUD shows the exact deflect cost and your spendable credit balance.',
-    hint: 'Deflecting is paid from credits (your claimable mining balance) — the same balance you would otherwise claim out to your wallet.',
+    body: 'Now and then a meteor streaks toward an asteroid. If it hits, it skims a cut of that asteroid\u2019s treasury and dents its yield for a while. You can pay credits to deflect it, and the deflection cost is routed straight into the treasury, so a deflected strike actually grows the pot. The HUD shows the exact deflect cost and your spendable credit balance.',
+    hint: 'Deflecting is paid from credits (your claimable mining balance), the same balance you would otherwise claim out to your wallet.',
   },
 ];
 
@@ -178,7 +178,7 @@ const CONTROLS: Control[] = [
   },
   {
     button: 'Stake',
-    what: 'Lock $ASTROID (top stats panel) to raise your drill tier — Bronze → Diamond — multiplying drill power and defense.',
+    what: 'Lock $ASTROID (top stats panel) to raise your drill tier from Bronze to Diamond, multiplying drill power and defense.',
   },
   {
     button: 'Set drill',
@@ -186,7 +186,7 @@ const CONTROLS: Control[] = [
   },
   {
     button: 'Raid',
-    what: 'Launch a timed expedition from your home against this asteroid to steal its treasury. PvP — expect counter-fire.',
+    what: 'Launch a timed expedition from your home against this asteroid to steal its treasury. PvP, so expect counter-fire.',
   },
   {
     button: 'Rally',
@@ -259,7 +259,7 @@ const TERMS: Term[] = [
   {
     term: 'Discovery',
     meaning:
-      'When an asteroid makes a find, the reward is split immediately among active miners, proportional to drill \u00d7 stake — so you are paid per discovery, not on a timer.',
+      'When an asteroid makes a find, the reward is split immediately among active miners, proportional to drill \u00d7 stake, so you are paid per discovery, not on a timer.',
   },
   {
     term: 'Credits',
@@ -269,7 +269,7 @@ const TERMS: Term[] = [
   {
     term: 'Claim',
     meaning:
-      'Move your credits on-chain: the gateway bridges them to IOU-ASTROID, then your wallet signs one atomic swap to receive real $ASTROID. Credits only leave once it confirms — nothing is lost mid-claim.',
+      'Move your credits on-chain: the gateway bridges them to IOU-ASTROID, then your wallet signs one atomic swap to receive real $ASTROID. Credits only leave once it confirms, so nothing is lost mid-claim.',
   },
   {
     term: 'Treasury (raid vault)',
@@ -289,7 +289,7 @@ const TERMS: Term[] = [
   {
     term: 'Rally',
     meaning:
-      'A defensive pulse — spend stake to harden an asteroid you hold against incoming raids.',
+      'A defensive pulse: spend stake to harden an asteroid you hold against incoming raids.',
   },
   {
     term: 'Meteor strike',

@@ -124,7 +124,7 @@ export function ShareCardModal({
           </div>
 
           <p className="mt-3 font-mono text-[10px] leading-relaxed text-white/40">
-            Share to X opens a post linking your card — it unfurls with this preview. Want it inline
+            Share to X opens a post linking your card. It unfurls with this preview. Want it inline
             instead? Copy or download and attach it.
           </p>
         </div>

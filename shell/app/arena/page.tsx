@@ -254,7 +254,7 @@ function ConnectedArena({
     const offResolved = session.on('raid_resolved', (d) => {
       const r = d as { attackersWon?: boolean; stolenYield?: number; asteroidId?: string };
       const msg = r.attackersWon
-        ? `Raid on ${nameFor(r.asteroidId)} succeeded — ${fmt(r.stolenYield ?? 0)} $ASTROID carried off.`
+        ? `Raid on ${nameFor(r.asteroidId)} succeeded: ${fmt(r.stolenYield ?? 0)} $ASTROID carried off.`
         : `Raid on ${nameFor(r.asteroidId)} was repelled.`;
       setRaidFeed((f) => [msg, ...f].slice(0, 6));
       const mine = pendingMyRaid.current;
@@ -314,8 +314,8 @@ function ConnectedArena({
       setRaidFeed((f) =>
         [
           m.deflected
-            ? `🛡 Meteor on ${nameFor(m.asteroidId)} deflected — treasury topped up.`
-            : `☄ Meteor struck ${nameFor(m.asteroidId)} — ${fmt(m.skimmed ?? 0)} $ASTROID lost.`,
+            ? `🛡 Meteor on ${nameFor(m.asteroidId)} deflected. Treasury topped up.`
+            : `☄ Meteor struck ${nameFor(m.asteroidId)}: ${fmt(m.skimmed ?? 0)} $ASTROID lost.`,
           ...f,
         ].slice(0, 6),
       );
@@ -605,7 +605,7 @@ function ConnectedArena({
     const looted = Math.round(lastRaid.stolenYield).toLocaleString('en-US');
     const tweet = lastRaid.won
       ? `Just raided ${lastRaid.targetName} for ${looted} $ASTROID on astroid.club. ⚔`
-      : `Hit ${lastRaid.targetName}'s defenses on astroid.club — they held. I'll be back. ⚔`;
+      : `Hit ${lastRaid.targetName}'s defenses on astroid.club. They held. I'll be back. ⚔`;
     void runShare(
       raidCardSpec({
         won: lastRaid.won,
@@ -1083,7 +1083,7 @@ function IdentityPanel({
         </div>
         <div className="mt-1.5 border-t border-white/10 pt-1.5 font-mono text-[9px] leading-relaxed text-white/40">
           Deflecting meteors spends credits (your claimable balance). Raid wagers escrow real
-          $ASTROID from your connected wallet — a win returns your wager, a loss burns 90% and pays
+          $ASTROID from your connected wallet. A win returns your wager, a loss burns 90% and pays
           10% to the defenders.
         </div>
       </div>
@@ -1127,7 +1127,7 @@ function IdentityPanel({
           className="mt-2 w-full rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-amber-300 transition hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={claiming}
           onClick={onFinishRedeem}
-          title="Your rewards were bridged to IOU-ASTROID but the redeem step didn't finish. Finish it now — nothing was lost."
+          title="Your rewards were bridged to IOU-ASTROID but the redeem step didn't finish. Finish it now. Nothing was lost."
           type="button"
         >
           {claiming ? 'Finishing…' : `Finish claim ${fmt(pendingRedeem)} → $ASTROID`}
@@ -1221,7 +1221,7 @@ function RaidInProgress({
         Striking <span className="text-white">{targetName}</span>
       </p>
       <p className="font-mono text-[10px] leading-relaxed text-white/55">
-        Your strike {fmt(expedition.attackPower)} vs {fmt(expedition.defenseToBeat)} needed —{' '}
+        Your strike {fmt(expedition.attackPower)} vs {fmt(expedition.defenseToBeat)} needed:{' '}
         <span className={winning ? 'text-emerald-300' : 'text-ember'}>
           {winning ? 'projected to break through' : 'not enough power yet'}
         </span>
@@ -1457,7 +1457,7 @@ function AsteroidActionPanel({
             <p className="self-end font-mono text-[10px] leading-relaxed text-white/45">
               Beat {fmt(stats?.defensePower ?? 0)} defense to carry off up to{' '}
               {fmt(stats?.stealableYield ?? 0)} $ASTROID from this asteroid&rsquo;s treasury. A wager
-              escrows real $ASTROID from your wallet — returned on a win, 90% burned (10% to
+              escrows real $ASTROID from your wallet, returned on a win, 90% burned (10% to
               defenders) on a loss.
             </p>
           </div>

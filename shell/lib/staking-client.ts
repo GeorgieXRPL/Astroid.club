@@ -127,7 +127,7 @@ export async function runStakeAction(
           ok: true,
           kind,
           signature,
-          message: `Staked ${formatAmount(amount)} $ASTROID — confirming on-chain; your tier updates shortly.`,
+          message: `Staked ${formatAmount(amount)} $ASTROID. Confirming on-chain; your tier updates shortly.`,
         };
       }
       throw err;
@@ -221,7 +221,7 @@ export async function runClaimToWallet(
       amount,
       bridgeSignature: bridge.signature,
       bridgedOnly: true,
-      message: `Bridged ${formatAmount(amount)} to IOU-ASTROID, but the redeem step failed (${reason}). Your rewards are now IOU-ASTROID tokens in your wallet — use "Redeem IOU" to convert to $ASTROID.`,
+      message: `Bridged ${formatAmount(amount)} to IOU-ASTROID, but the redeem step failed (${reason}). Your rewards are now IOU-ASTROID tokens in your wallet. Use "Redeem IOU" to convert to $ASTROID.`,
     };
   }
 }
@@ -292,12 +292,12 @@ export async function runWagerRaid(
     expeditionId: started.expeditionId,
     wagerId: build.wagerId,
     depositSignature,
-    message: `Escrowed ${formatAmount(amount)} $ASTROID — raid launched (tx ${shortSig(depositSignature)}).`,
+    message: `Escrowed ${formatAmount(amount)} $ASTROID. Raid launched (tx ${shortSig(depositSignature)}).`,
   };
 }
 
 function shortSig(sig?: string): string {
-  return sig ? `${sig.slice(0, 8)}…` : '—';
+  return sig ? `${sig.slice(0, 8)}…` : 'n/a';
 }
 
 /** Read the wallet's on-chain stake position; returns null on transport error. */

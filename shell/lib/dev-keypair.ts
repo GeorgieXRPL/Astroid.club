@@ -134,7 +134,7 @@ async function devSignAndSendTransaction(tx: SignableTransaction, kp: DevKeypair
   const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
   if (!rpcUrl) {
     throw new Error(
-      'NEXT_PUBLIC_SOLANA_RPC_URL is not set — dev-mode staking needs an RPC to submit transactions to.',
+      'NEXT_PUBLIC_SOLANA_RPC_URL is not set. Dev-mode staking needs an RPC to submit transactions to.',
     );
   }
   const { Connection, Keypair, Transaction } = await import('@solana/web3.js');

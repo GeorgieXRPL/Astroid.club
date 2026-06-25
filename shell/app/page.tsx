@@ -536,9 +536,9 @@ const UTILITIES: UtilityCard[] = [
     pillar: 'Perks',
     title: 'Mining arena',
     status: 'live',
-    body: 'Mine a procedural belt and get paid as discoveries land. Lock $ASTROID to climb USD-pegged drill tiers (Bronze → Diamond) that multiply your output, raid rival asteroids to carry off their treasury, rally to defend, and deflect incoming meteor strikes to shield — and grow — your vault. A live HUD navigation guide and raid console keep the action in view, and one click turns any run or raid into a shareable card. Staking runs on the audited Quarry protocol — your tokens stay in your control and unstake any time.',
+    body: 'Mine a procedural belt and get paid as discoveries land. Lock $ASTROID to climb USD-pegged drill tiers (Bronze to Diamond) that multiply your output, raid rival asteroids to carry off their treasury, rally to defend, and deflect incoming meteor strikes to shield and grow your vault. A live HUD navigation guide and raid console keep the action in view, and one click turns any run or raid into a shareable card. Staking runs on the audited Quarry protocol, so your tokens stay in your control and unstake any time.',
     fineprint:
-      'Staking is non-custodial: $ASTROID is locked in the audited, third-party Quarry protocol, never in a Club-controlled treasury, and is withdrawable any time. Staking is a gameplay buff, not an investment — no yield, interest, or profit is promised. In-game mining credits are game artifacts with no promised redemption value.',
+      'Staking is non-custodial: $ASTROID is locked in the audited, third-party Quarry protocol, never in a Club-controlled treasury, and is withdrawable any time. Staking is a gameplay buff, not an investment. No yield, interest, or profit is promised. In-game mining credits are game artifacts with no promised redemption value.',
   },
   {
     pillar: 'Perks',

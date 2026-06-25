@@ -166,17 +166,17 @@ function toneFor(state: HealthState): { tone: 'green' | 'amber' | 'red'; label: 
 }
 
 function lastCheckLabel(state: HealthState): string {
-  if (state.kind === 'loading') return '—';
+  if (state.kind === 'loading') return '…';
   return new Date(state.checkedAt).toLocaleTimeString();
 }
 
 function latencyLabel(state: HealthState): string {
-  if (state.kind !== 'ok') return '—';
+  if (state.kind !== 'ok') return 'n/a';
   return `${state.latencyMs} ms`;
 }
 
 function chainLabel(state: HealthState): string {
-  if (state.kind !== 'ok') return '—';
+  if (state.kind !== 'ok') return 'n/a';
   if (state.data.chainEnabled === undefined) return 'unknown';
   return state.data.chainEnabled ? 'on (read-only)' : 'off';
 }
