@@ -164,13 +164,19 @@ export default function SignInPage() {
           </div>
         </section>
 
-        {auth.kind === 'error' && (
-          <section className="mb-6 rounded-2xl border border-ember/40 bg-ember/10 p-6">
-            <p className="telemetry-label mb-2 text-ember">Sign-in failed</p>
-            <p className="mb-1 font-mono text-xs text-ember/85">code: {auth.code}</p>
-            <p className="text-sm text-white/85">{auth.message}</p>
-          </section>
-        )}
+        {auth.kind === 'error' &&
+          (auth.code === 'beta_locked' ? (
+            <section className="mb-6 rounded-2xl border border-cosmos/30 bg-cosmos/10 p-6">
+              <p className="telemetry-label mb-2 text-cosmos">Closed beta</p>
+              <p className="text-sm leading-relaxed text-white/85">{auth.message}</p>
+            </section>
+          ) : (
+            <section className="mb-6 rounded-2xl border border-ember/40 bg-ember/10 p-6">
+              <p className="telemetry-label mb-2 text-ember">Sign-in failed</p>
+              <p className="mb-1 font-mono text-xs text-ember/85">code: {auth.code}</p>
+              <p className="text-sm text-white/85">{auth.message}</p>
+            </section>
+          ))}
 
         {auth.kind === 'connected' && (
           <section className="glass-panel-bright p-6">

@@ -276,11 +276,16 @@ function ClubOutside({
         <WalletProviderBadge mode={wallet.mode} />
       </div>
 
-      {error && (
-        <div className="mt-6 max-w-md rounded-md border border-ember/40 bg-ember/10 px-4 py-3 font-mono text-xs text-ember">
-          {error.code}: {error.message}
-        </div>
-      )}
+      {error &&
+        (error.code === 'beta_locked' ? (
+          <div className="mt-6 max-w-md rounded-md border border-cosmos/30 bg-cosmos/10 px-4 py-3 text-xs leading-relaxed text-cosmos/90">
+            {error.message}
+          </div>
+        ) : (
+          <div className="mt-6 max-w-md rounded-md border border-ember/40 bg-ember/10 px-4 py-3 font-mono text-xs text-ember">
+            {error.code}: {error.message}
+          </div>
+        ))}
 
       <div className="mt-16 flex flex-col items-center gap-2 font-mono text-[10px] uppercase tracking-[0.32em] text-white/40 sm:text-xs">
         <span className="flex items-center gap-2.5">

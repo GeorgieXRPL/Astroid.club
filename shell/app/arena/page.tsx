@@ -120,17 +120,30 @@ function DisconnectedArena({
             {store.state === 'connecting' ? 'Connecting' : 'Sign in to mine'}
           </p>
           <h2 className="mb-4 font-display text-2xl text-white">
-            {store.state === 'error' ? 'Sign-in failed' : 'A door is about to open'}
+            {store.state === 'error'
+              ? store.error?.code === 'beta_locked'
+                ? 'Closed beta'
+                : 'Sign-in failed'
+              : 'A door is about to open'}
           </h2>
           {store.state === 'error' && store.error ? (
-            <>
-              <p className="mb-4 font-mono text-xs text-ember">
-                {store.error.code}: {store.error.message}
-              </p>
-              <Link className="btn-primary" href="/sign-in">
-                Try again
-              </Link>
-            </>
+            store.error.code === 'beta_locked' ? (
+              <>
+                <p className="mb-4 text-sm leading-relaxed text-cosmos/90">{store.error.message}</p>
+                <Link className="btn-primary" href="/">
+                  Back to astroid.club
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="mb-4 font-mono text-xs text-ember">
+                  {store.error.code}: {store.error.message}
+                </p>
+                <Link className="btn-primary" href="/sign-in">
+                  Try again
+                </Link>
+              </>
+            )
           ) : store.state === 'connecting' ? (
             <p className="text-sm text-white/55">
               {walletMode === 'privy' ? 'Verifying signature…' : 'Authenticating dev keypair…'}

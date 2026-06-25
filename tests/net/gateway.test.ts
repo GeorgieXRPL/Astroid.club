@@ -223,8 +223,8 @@ describe('AstroidGateway wallet allowlist', () => {
     const stranger = makeWallet();
     const reply = await authWith(stranger);
     expect(reply.type).toBe('error');
-    expect(reply.code).toBe('rejected');
-    expect(reply.message).toMatch(/allowlist/i);
+    expect(reply.code).toBe('beta_locked');
+    expect(reply.message).toMatch(/closed beta/i);
   });
 });
 

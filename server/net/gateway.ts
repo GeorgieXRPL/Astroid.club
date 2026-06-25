@@ -445,7 +445,17 @@ export class AstroidGateway {
           this.log.warn(
             `[gateway] auth rejected: ${message.walletAddress.slice(0, 8)}… not on the allowlist`,
           );
-          this.replyError(conn, requestId, 'rejected', 'wallet not on the access allowlist');
+          // Public-facing copy: the wallet IS valid, it just isn't in the
+          // closed-beta allowlist yet. Surface it as an intentional "not open
+          // to everyone yet" notice (code `beta_locked`) rather than a scary
+          // auth failure, so the apex CTA reads as "coming soon" for the public
+          // while allowlisted testers pass straight through.
+          this.replyError(
+            conn,
+            requestId,
+            'beta_locked',
+            'Public entry opens soon — access is limited to the closed beta right now.',
+          );
           return;
         }
         meta.walletAddress = message.walletAddress;
