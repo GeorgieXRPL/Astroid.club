@@ -656,7 +656,7 @@ const ROADMAP: Array<{ slice: string; state: 'landed' | 'next' | 'queued' }> = [
   { slice: 'Navigation guide + live raid console in the arena HUD', state: 'landed' },
   { slice: 'Claim to wallet · bridge + atomic redeem to $ASTROID', state: 'landed' },
   { slice: 'Shareable PNL cards · mining + raid reports', state: 'landed' },
-  { slice: 'Mainnet holder reads · Helius DAS + flash-loan window', state: 'next' },
+  { slice: 'Mainnet holder reads · Helius DAS + flash-loan window', state: 'landed' },
   { slice: 'Astroid NFT drop minter · phase-gated, free claim', state: 'queued' },
   { slice: 'Solar Flare / Stellar Strike visual events', state: 'queued' },
   { slice: 'Members lounge · holder-gated updates feed', state: 'queued' },
