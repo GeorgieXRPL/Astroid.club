@@ -89,6 +89,7 @@ function makeChainOps(verifyHolderImpl: (wallet: string) => Promise<boolean>): C
     astroidMint: 'AstroIDMintStubXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
     astroidDecimals: 9,
     holderMinBalance: 1,
+    holderMinSol: 0,
     holderMinHoldSeconds: 600,
     holderPrewarmEnabled: true,
     holderPrewarmMaxLookback: 100,
@@ -538,6 +539,7 @@ describe('AstroidGateway verify_holder', () => {
       astroidMint: undefined,
       astroidDecimals: 9,
       holderMinBalance: 1,
+      holderMinSol: 0,
       holderMinHoldSeconds: 600,
       holderPrewarmEnabled: true,
       holderPrewarmMaxLookback: 100,
@@ -683,6 +685,7 @@ describe('AstroidGateway on-chain staking messages', () => {
       astroidMint: 'AstroIDMintStubXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
       astroidDecimals: 6,
       holderMinBalance: 1,
+      holderMinSol: 0,
       holderMinHoldSeconds: 600,
       holderPrewarmEnabled: true,
       holderPrewarmMaxLookback: 100,
@@ -1041,7 +1044,13 @@ describe('AstroidGateway wager-deposit messages', () => {
   async function sendResult(
     sock: WebSocket,
     payload: { requestId: string; [k: string]: unknown },
-  ): Promise<{ type: string; requestId?: string; code?: string; message?: string; data?: unknown }> {
+  ): Promise<{
+    type: string;
+    requestId?: string;
+    code?: string;
+    message?: string;
+    data?: unknown;
+  }> {
     return new Promise((resolve, reject) => {
       const onMessage = (data: WebSocket.RawData) => {
         const msg = JSON.parse(data.toString('utf-8'));
@@ -1083,6 +1092,7 @@ describe('AstroidGateway wager-deposit messages', () => {
       astroidMint: 'AstroIDMintStubXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
       astroidDecimals: 6,
       holderMinBalance: 1,
+      holderMinSol: 0,
       holderMinHoldSeconds: 600,
       holderPrewarmEnabled: true,
       holderPrewarmMaxLookback: 100,

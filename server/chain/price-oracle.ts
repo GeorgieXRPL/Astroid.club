@@ -15,6 +15,9 @@
 
 const JUP_PRICE_URL = 'https://api.jup.ag/price/v3';
 
+/** Wrapped-SOL mint, used to price the holder gate in SOL terms. */
+export const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
+
 export interface PriceOracleLogger {
   info?: (msg: string) => void;
   warn?: (msg: string) => void;
@@ -24,6 +27,12 @@ export interface PriceOracleLogger {
 export interface PriceOracleConfig {
   /** $ASTROID SPL mint address to price. */
   mint: string;
+  /**
+   * Optional second mint (e.g. wrapped SOL) to track alongside $ASTROID in the
+   * same request. Powers SOL-denominated pegs like the holder gate. The primary
+   * `mint` price still drives success/failure; this one is best-effort.
+   */
+  solMint?: string;
   /** Optional Jupiter API key (sent as `x-api-key`). */
   apiKey?: string;
   /** Poll cadence in ms. Default 5 min. Set 0 to disable the interval. */
@@ -39,8 +48,10 @@ const DEFAULT_REFRESH_MS = 5 * 60_000;
 
 export class PriceOracle {
   private price = 0;
+  private solPrice = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly mint: string;
+  private readonly solMint: string | undefined;
   private readonly apiKey: string | undefined;
   private readonly refreshMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -49,6 +60,7 @@ export class PriceOracle {
 
   constructor(config: PriceOracleConfig) {
     this.mint = config.mint;
+    this.solMint = config.solMint;
     this.apiKey = config.apiKey;
     this.refreshMs = config.refreshMs ?? DEFAULT_REFRESH_MS;
     this.fetchImpl = config.fetchImpl ?? globalThis.fetch.bind(globalThis);
@@ -56,9 +68,17 @@ export class PriceOracle {
     this.onPrice = config.onPrice;
   }
 
-  /** Latest known price (0 until the first successful fetch). */
+  /** Latest known $ASTROID/USD price (0 until the first successful fetch). */
   getPrice(): number {
     return this.price;
+  }
+
+  /**
+   * Latest known SOL/USD price (0 until the first successful fetch). Only
+   * tracked when `solMint` was configured; otherwise stays 0.
+   */
+  getSolPrice(): number {
+    return this.solPrice;
   }
 
   /** Fetch once, then poll on the configured interval. */
@@ -81,12 +101,25 @@ export class PriceOracle {
   /** Fetch a single quote. Returns the price, or null on failure. */
   async refreshOnce(): Promise<number | null> {
     try {
-      const url = `${JUP_PRICE_URL}?ids=${encodeURIComponent(this.mint)}`;
+      const ids = [this.mint, this.solMint]
+        .filter((id): id is string => !!id)
+        .map(encodeURIComponent)
+        .join(',');
+      const url = `${JUP_PRICE_URL}?ids=${ids}`;
       const res = await this.fetchImpl(url, {
         headers: this.apiKey ? { 'x-api-key': this.apiKey } : undefined,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as Record<string, { usdPrice?: number } | undefined>;
+      // SOL price is best-effort and never gates success: a missing/zero SOL
+      // quote keeps the last good value (and the holder gate falls back to its
+      // static floor while SOL is unknown).
+      if (this.solMint) {
+        const solUsd = body?.[this.solMint]?.usdPrice;
+        if (typeof solUsd === 'number' && Number.isFinite(solUsd) && solUsd > 0) {
+          this.solPrice = solUsd;
+        }
+      }
       const usdPrice = body?.[this.mint]?.usdPrice;
       if (typeof usdPrice === 'number' && Number.isFinite(usdPrice) && usdPrice > 0) {
         this.price = usdPrice;

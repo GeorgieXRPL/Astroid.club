@@ -430,6 +430,83 @@ describe('HolderChainAdapter.verifyHolderQualified: pre-warm', () => {
 });
 
 // =============================================================================
+// verifyHolderQualified: dynamic (pegged) threshold provider
+// =============================================================================
+
+describe('HolderChainAdapter.verifyHolderQualified: requiredBalanceProvider', () => {
+  function makePeggedAdapter(provider: () => number, opts?: { balance?: number; floor?: number }) {
+    const clock = new FakeClock();
+    const reader = new FakeReader(new Map([[ALICE, opts?.balance ?? 1_000_000]]));
+    const tracker = new HolderTracker({
+      minHoldMs: 0,
+      minConsecutiveObservations: 1,
+      logger: silentLogger,
+      now: clock.now,
+    });
+    const adapter = new HolderChainAdapter({
+      reader,
+      tracker,
+      requiredBalance: opts?.floor ?? 100,
+      requiredBalanceProvider: provider,
+      cacheTtlMs: 0,
+      logger: silentLogger,
+      now: clock.now,
+    });
+    return { adapter, clock };
+  }
+
+  it('uses the provider value over the static floor when it is positive', async () => {
+    // Balance 1.0M; pegged requirement 1.25M ⇒ below threshold ⇒ ineligible,
+    // even though it is far above the static floor of 100.
+    const { adapter } = makePeggedAdapter(() => 1_250_000, { balance: 1_000_000, floor: 100 });
+    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+  });
+
+  it('qualifies when the balance clears the live pegged requirement', async () => {
+    const { adapter } = makePeggedAdapter(() => 1_250_000, { balance: 2_000_000, floor: 100 });
+    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+  });
+
+  it('falls back to the static floor when the provider returns 0 (oracle cold)', async () => {
+    // Provider yields 0 (no live quote) ⇒ the 100-token floor applies, so a
+    // 1.0M balance qualifies.
+    const { adapter } = makePeggedAdapter(() => 0, { balance: 1_000_000, floor: 100 });
+    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true);
+  });
+
+  it('falls back to the static floor when the provider returns a non-finite value', async () => {
+    const { adapter } = makePeggedAdapter(() => Number.NaN, { balance: 50, floor: 100 });
+    // Floor 100 applies; balance 50 < 100 ⇒ ineligible.
+    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false);
+  });
+
+  it('tracks a moving peg between verifies (token count scales with price)', async () => {
+    let required = 2_000_000; // expensive while $ASTROID is cheap
+    const clock = new FakeClock();
+    const reader = new FakeReader(new Map([[ALICE, 1_500_000]]));
+    const tracker = new HolderTracker({
+      minHoldMs: 0,
+      minConsecutiveObservations: 1,
+      logger: silentLogger,
+      now: clock.now,
+    });
+    const adapter = new HolderChainAdapter({
+      reader,
+      tracker,
+      requiredBalance: 100,
+      requiredBalanceProvider: () => required,
+      cacheTtlMs: 0,
+      logger: silentLogger,
+      now: clock.now,
+    });
+    expect(await adapter.verifyHolderQualified(ALICE)).toBe(false); // 1.5M < 2.0M
+    required = 1_000_000; // price/MC rose ⇒ fewer tokens needed
+    clock.advance(1);
+    expect(await adapter.verifyHolderQualified(ALICE)).toBe(true); // 1.5M ≥ 1.0M
+  });
+});
+
+// =============================================================================
 // Configuration validation
 // =============================================================================
 

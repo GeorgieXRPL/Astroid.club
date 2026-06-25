@@ -65,4 +65,44 @@ describe('PriceOracle', () => {
     expect(await oracle.refreshOnce()).toBeNull();
     expect(oracle.getPrice()).toBe(0);
   });
+
+  it('tracks a second (SOL) mint in the same request when solMint is set', async () => {
+    const SOL = 'So11111111111111111111111111111111111111112';
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ [MINT]: { usdPrice: 0.00005 }, [SOL]: { usdPrice: 68.23 } }),
+    ) as unknown as typeof fetch;
+    const oracle = new PriceOracle({ mint: MINT, solMint: SOL, refreshMs: 0, fetchImpl });
+    await oracle.refreshOnce();
+    expect(oracle.getPrice()).toBe(0.00005);
+    expect(oracle.getSolPrice()).toBe(68.23);
+    // Both ids ride in a single request.
+    const url = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(url).toContain(MINT);
+    expect(url).toContain(SOL);
+  });
+
+  it('getSolPrice stays 0 when solMint is not configured', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ [MINT]: { usdPrice: 0.1 } }),
+    ) as unknown as typeof fetch;
+    const oracle = new PriceOracle({ mint: MINT, refreshMs: 0, fetchImpl });
+    await oracle.refreshOnce();
+    expect(oracle.getSolPrice()).toBe(0);
+  });
+
+  it('keeps the last good SOL price when a later quote omits it (best-effort)', async () => {
+    const SOL = 'So11111111111111111111111111111111111111112';
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      call += 1;
+      return call === 1
+        ? jsonResponse({ [MINT]: { usdPrice: 0.00005 }, [SOL]: { usdPrice: 68 } })
+        : jsonResponse({ [MINT]: { usdPrice: 0.00006 } }); // SOL missing this round
+    }) as unknown as typeof fetch;
+    const oracle = new PriceOracle({ mint: MINT, solMint: SOL, refreshMs: 0, fetchImpl });
+    await oracle.refreshOnce();
+    await oracle.refreshOnce();
+    expect(oracle.getPrice()).toBe(0.00006); // updated
+    expect(oracle.getSolPrice()).toBe(68); // retained
+  });
 });

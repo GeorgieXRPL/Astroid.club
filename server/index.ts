@@ -38,7 +38,7 @@ import { LogBuffer } from './admin/log-buffer.js';
 import { HolderChainAdapter, SolanaBalanceReader } from './chain/holder.js';
 import { ChainOps, type ChainOpsImplementations } from './chain/index.js';
 import { OnChainHoldEstimator } from './chain/prewarm.js';
-import { PriceOracle } from './chain/price-oracle.js';
+import { PriceOracle, WRAPPED_SOL_MINT } from './chain/price-oracle.js';
 import { BetEscrowChainService, getBetEscrowConfigFromEnv } from './chain/bet-escrow-chain.js';
 import { EscrowManager } from './chain/escrow-manager.js';
 import { RedeemerService, getRedeemerConfigFromEnv } from './chain/redeemer.js';
@@ -177,6 +177,11 @@ async function main(): Promise<void> {
   // The escrow chain service, hoisted so the durable EscrowManager can drive
   // its return/payDefender/burnWager legs after the store is selected below.
   let betEscrowChainSvc: BetEscrowChainService | undefined;
+  // Live price feed, hoisted so the holder gate's SOL-pegged threshold can read
+  // it. Created + started further below (after the gateway is wired); the gate's
+  // provider closure reads it lazily and falls back to the static floor until
+  // the first quote lands.
+  let priceOracle: PriceOracle | undefined;
   if (runtime.chainEnabled && runtime.rpcUrl && runtime.astroidMint) {
     // Plug the holder layer's loggers into the gateway's console so
     // operators can see why a wallet got the answer it got. Logs are
@@ -230,15 +235,35 @@ async function main(): Promise<void> {
       );
     }
 
+    // Optional SOL-pegged holder gate: when HOLDER_MIN_SOL > 0 the required
+    // $ASTROID balance is recomputed live as `minSol * SOL_usd / ASTROID_usd`,
+    // so entry stays worth ~N SOL and the token count drops as $ASTROID rises.
+    // `priceOracle` is assigned later (below); the closure reads it lazily and
+    // returns 0 (→ static floor) until the first quote arrives.
+    const holderMinSol = runtime.holderMinSol;
     const holder = new HolderChainAdapter({
       reader,
       tracker,
       estimator,
       requiredBalance: runtime.holderMinBalance,
+      requiredBalanceProvider:
+        holderMinSol > 0
+          ? () => {
+              const solUsd = priceOracle?.getSolPrice() ?? 0;
+              const astroidUsd = priceOracle?.getPrice() ?? 0;
+              return solUsd > 0 && astroidUsd > 0 ? (holderMinSol * solUsd) / astroidUsd : 0;
+            }
+          : undefined,
       logger: console,
     });
     chainImpls.getHolderBalance = (wallet) => holder.getHolderBalance(wallet);
     chainImpls.verifyHolderQualified = (wallet) => holder.verifyHolderQualified(wallet);
+    if (holderMinSol > 0) {
+      console.info(
+        `[astroid-club] holder gate pegged to ~${holderMinSol} SOL of $ASTROID ` +
+          `(live Jupiter oracle; static floor ${runtime.holderMinBalance} tokens until a quote lands).`,
+      );
+    }
 
     // Quarry staking (build-and-sign). Only wired when the Quarry
     // program addresses are present in the environment (rewarder +
@@ -637,12 +662,14 @@ async function main(): Promise<void> {
     );
   }
 
-  // Live $ASTROID/USD price feed → dynamic, USD-pegged stake tiers. Only runs
-  // when we know the mint; otherwise tiers use their static token fallbacks.
-  let priceOracle: PriceOracle | undefined;
+  // Live $ASTROID/USD price feed → dynamic, USD-pegged stake tiers (and, when
+  // HOLDER_MIN_SOL is set, the SOL-pegged holder gate). Only runs when we know
+  // the mint; otherwise tiers use their static token fallbacks. SOL is tracked
+  // in the same request only when the gate needs it.
   if (runtime.astroidMint) {
     priceOracle = new PriceOracle({
       mint: runtime.astroidMint,
+      solMint: runtime.holderMinSol > 0 ? WRAPPED_SOL_MINT : undefined,
       apiKey: process.env.JUP_API_KEY || undefined,
       refreshMs: Number(process.env.STAKE_TIER_PRICE_REFRESH_MS ?? String(5 * 60_000)),
       logger: console,

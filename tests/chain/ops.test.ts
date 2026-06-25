@@ -43,6 +43,7 @@ function offRuntime(): AstroidRuntime {
     astroidMint: undefined,
     astroidDecimals: 9,
     holderMinBalance: 1,
+    holderMinSol: 0,
     holderMinHoldSeconds: 600,
     holderPrewarmEnabled: true,
     holderPrewarmMaxLookback: 100,

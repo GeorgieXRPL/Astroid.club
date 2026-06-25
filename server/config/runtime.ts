@@ -28,8 +28,19 @@ export interface AstroidRuntime {
   readonly astroidMint: string | undefined;
   /** $ASTROID decimals (default 9). */
   readonly astroidDecimals: number;
-  /** Minimum balance to qualify for the club. */
+  /**
+   * Static minimum balance (token units) to qualify for the club. Also the
+   * cold-start floor when `holderMinSol` is set but the price oracle has no
+   * live quote yet.
+   */
   readonly holderMinBalance: number;
+  /**
+   * Optional SOL-denominated holder gate. When `> 0`, the required $ASTROID
+   * balance is recomputed live as `holderMinSol * SOL_usd / ASTROID_usd`, so
+   * the entry stays worth ~N SOL and the token count scales down as $ASTROID's
+   * price/MC rises. `0` (default) keeps the static `holderMinBalance` gate.
+   */
+  readonly holderMinSol: number;
   /** Continuous-hold seconds before a wallet qualifies (flash-loan guard). */
   readonly holderMinHoldSeconds: number;
   /**
@@ -78,6 +89,7 @@ export const runtime: AstroidRuntime = (() => {
     astroidMint: requireEnv('ASTROID_MINT_ADDRESS', chainEnabled),
     astroidDecimals: Number(process.env.ASTROID_DECIMALS ?? '9'),
     holderMinBalance: Number(process.env.HOLDER_MIN_BALANCE ?? '1'),
+    holderMinSol: Number(process.env.HOLDER_MIN_SOL ?? '0'),
     holderMinHoldSeconds: Number(process.env.HOLDER_MIN_HOLD_SECONDS ?? '600'),
     holderPrewarmEnabled: truthy(process.env.HOLDER_PREWARM_ENABLED ?? 'true'),
     holderPrewarmMaxLookback: Number(process.env.HOLDER_PREWARM_MAX_LOOKBACK ?? '100'),

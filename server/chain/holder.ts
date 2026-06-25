@@ -166,8 +166,20 @@ export interface HolderChainAdapterConfig {
   reader: BalanceReader;
   /** Pure in-memory eligibility tracker. */
   tracker: HolderTracker;
-  /** Required balance threshold (production: runtime.holderMinBalance). */
+  /**
+   * Static required balance threshold, in token units (production:
+   * `runtime.holderMinBalance`). Also the **cold-start floor** used whenever
+   * `requiredBalanceProvider` is absent or returns a non-positive value.
+   */
   requiredBalance: number;
+  /**
+   * Optional dynamic threshold. When supplied and it returns a finite value
+   * `> 0`, it OVERRIDES `requiredBalance` for that verify — e.g. a SOL- or
+   * USD-pegged minimum recomputed from a live price oracle, so the token count
+   * scales down as $ASTROID's price/MC rises. When it returns `0` / non-finite
+   * (oracle cold or unavailable) the adapter falls back to `requiredBalance`.
+   */
+  requiredBalanceProvider?: () => number;
   /**
    * Successful reads are cached for this many ms. Zero disables
    * caching. Default 30_000 (matches BG `CACHE_DURATION_MS`).
@@ -197,6 +209,7 @@ export class HolderChainAdapter {
   private readonly reader: BalanceReader;
   private readonly tracker: HolderTracker;
   private readonly requiredBalance: number;
+  private readonly requiredBalanceProvider: (() => number) | undefined;
   private readonly cacheTtlMs: number;
   private readonly estimator: HoldStartEstimator | undefined;
   private readonly now: () => number;
@@ -207,6 +220,7 @@ export class HolderChainAdapter {
     this.reader = config.reader;
     this.tracker = config.tracker;
     this.requiredBalance = config.requiredBalance;
+    this.requiredBalanceProvider = config.requiredBalanceProvider;
     this.cacheTtlMs = config.cacheTtlMs ?? 30_000;
     this.estimator = config.estimator;
     this.now = config.now ?? (() => Date.now());
@@ -220,6 +234,19 @@ export class HolderChainAdapter {
     if (this.cacheTtlMs < 0) {
       throw new Error(`HolderChainAdapter: cacheTtlMs must be >= 0 (got ${this.cacheTtlMs})`);
     }
+  }
+
+  /**
+   * The effective balance threshold for this verify. Uses the dynamic
+   * provider (e.g. a live SOL-pegged minimum) when it yields a positive,
+   * finite value; otherwise falls back to the static `requiredBalance` floor.
+   */
+  private resolveRequiredBalance(): number {
+    if (this.requiredBalanceProvider) {
+      const dynamic = this.requiredBalanceProvider();
+      if (Number.isFinite(dynamic) && dynamic > 0) return dynamic;
+    }
+    return this.requiredBalance;
   }
 
   /**
@@ -259,6 +286,7 @@ export class HolderChainAdapter {
    */
   async verifyHolderQualified(walletAddress: string): Promise<boolean> {
     const balance = await this.getHolderBalance(walletAddress);
+    const required = this.resolveRequiredBalance();
 
     // Pre-warm only fires when (a) we have an estimator, (b) the
     // wallet meets the balance threshold (the estimator has nothing
@@ -269,14 +297,14 @@ export class HolderChainAdapter {
     // unnecessary RPC round trip.
     if (
       this.estimator !== undefined &&
-      balance >= this.requiredBalance &&
+      balance >= required &&
       this.tracker.getHistory(walletAddress) === undefined
     ) {
       try {
         const holdStartMs = await this.estimator.estimateHoldStartMs(
           walletAddress,
           balance,
-          this.requiredBalance,
+          required,
         );
         if (holdStartMs !== null) {
           this.tracker.seedHoldStart(walletAddress, holdStartMs, balance);
@@ -292,11 +320,11 @@ export class HolderChainAdapter {
       }
     }
 
-    const decision = this.tracker.recordObservation(walletAddress, balance, this.requiredBalance);
+    const decision = this.tracker.recordObservation(walletAddress, balance, required);
     if (!decision.eligible) {
       this.log.info(
         `[HolderChain] ${walletAddress.slice(0, 8)}... not eligible: ${decision.reason} ` +
-          `(balance=${balance} required=${this.requiredBalance})`,
+          `(balance=${balance} required=${required})`,
       );
     }
     return decision.eligible;
