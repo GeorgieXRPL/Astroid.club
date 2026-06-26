@@ -97,7 +97,7 @@ fly secrets set ESCROW_PRIVATE_KEY="$(cat escrow.json)" --app astroid-club-gw
 fly secrets set \
   HOLDER_MIN_SOL="1" \
   HOLDER_MIN_BALANCE="1250000" \
-  HOLDER_MIN_HOLD_SECONDS="86400" \
+  HOLDER_MIN_HOLD_SECONDS="1800" \
   --app astroid-club-gw
 ```
 
@@ -110,7 +110,7 @@ fly secrets set \
       first oracle quote lands. Keep it near the current pegged value.
       _For a fixed token count instead:_ leave `HOLDER_MIN_SOL` **unset** and set
       `HOLDER_MIN_BALANCE` to the count you want.
-- [ ] `HOLDER_MIN_HOLD_SECONDS=86400` — 24h hold window for sybil/flash-loan
+- [ ] `HOLDER_MIN_HOLD_SECONDS=1800` — 30-minute hold window for sybil/flash-loan
       resistance. New holders see a live countdown to access while inside it.
 - [ ] **Emission caps** (in `fly.toml` `[env]`, flagged `TODO(before public launch)`):
       size `EMISSION_BUDGET` to real funded IOU backing, lower `EMISSION_DAILY_CAP`

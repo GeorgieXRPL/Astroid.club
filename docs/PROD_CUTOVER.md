@@ -115,7 +115,7 @@ These are still at test defaults. Set the production values:
 fly secrets set \
   HOLDER_MIN_SOL="1" \
   HOLDER_MIN_BALANCE="1250000" \
-  HOLDER_MIN_HOLD_SECONDS="86400" \
+  HOLDER_MIN_HOLD_SECONDS="1800" \
   --app astroid-club-gw
 ```
 
@@ -132,8 +132,8 @@ token count **scales down as `$ASTROID`'s price/MC rises**.
   Set it near the current pegged value (~`1250000`) so the gate is never loose
   during warmup. To use a **fixed token count instead** (no peg), leave
   `HOLDER_MIN_SOL` unset and set `HOLDER_MIN_BALANCE` to the count you want.
-- `HOLDER_MIN_HOLD_SECONDS=86400` (24h) for production sybil/flash-loan resistance
-  (test default ~10 min).
+- `HOLDER_MIN_HOLD_SECONDS=1800` (30 min) for sybil/flash-loan resistance. New
+  holders inside the window see a live countdown to arena access.
 
 **Emission caps** (currently in `fly.toml` `[env]`, flagged `TODO(before public launch)`):
 size `EMISSION_BUDGET` to your real funded IOU backing and lower `EMISSION_DAILY_CAP`
