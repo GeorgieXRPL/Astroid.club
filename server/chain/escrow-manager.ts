@@ -296,6 +296,23 @@ export class EscrowManager {
     return total;
   }
 
+  /**
+   * Snapshot of unsettled escrow for the admin console: per-status counts and
+   * the outstanding (active + settling) liability. `failed` rows are parked and
+   * need manual ops, so they're surfaced separately.
+   */
+  getSummary(): { active: number; settling: number; failed: number; outstanding: number } {
+    let active = 0;
+    let settling = 0;
+    let failed = 0;
+    for (const record of this.records.values()) {
+      if (record.status === 'active') active += 1;
+      else if (record.status === 'settling') settling += 1;
+      else if (record.status === 'failed') failed += 1;
+    }
+    return { active, settling, failed, outstanding: this.outstandingLiability() };
+  }
+
   private async persist(record: EscrowWagerRecord): Promise<void> {
     try {
       await this.store.put(record);

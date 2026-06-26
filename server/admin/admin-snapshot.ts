@@ -8,6 +8,8 @@
  * never mutate the game.
  */
 
+import type { EscrowManager } from '../chain/escrow-manager.js';
+import type { PriceOracle } from '../chain/price-oracle.js';
 import { runtime } from '../config/runtime.js';
 import { getStakeTier } from '../game/types.js';
 import type { GameWorld } from '../game/world.js';
@@ -23,6 +25,14 @@ export interface AdminSnapshotDeps {
   quarryEnabled: boolean;
   payoutsOnChain: boolean;
   startedAt: number;
+  /**
+   * Lazy accessor for the live price oracle. Lazy because the oracle is
+   * constructed after the admin handler is wired; the closure reads whatever
+   * instance exists at snapshot time (or `undefined` before it starts).
+   */
+  getPriceOracle?: () => PriceOracle | undefined;
+  /** Durable raid-wager escrow manager, when chain + escrow are wired. */
+  escrowManager?: EscrowManager;
 }
 
 export interface AdminPlayer {
@@ -53,6 +63,25 @@ export interface AdminSnapshot {
     persistence: PersistenceMode;
     connected: number;
   };
+  /**
+   * Holder-gate posture. `requiredAstroid` is the LIVE threshold: when the gate
+   * is SOL-pegged (`minSol > 0`) it's recomputed from the oracle each snapshot
+   * (`minSol × solUsd / astroidUsd`); otherwise it's the static token floor.
+   * `oracleUpdatedAt` is 0 when no quote has landed (gate is on the floor).
+   */
+  holderGate: {
+    enabled: boolean;
+    pegged: boolean;
+    minSol: number;
+    requiredAstroid: number;
+    staticFloor: number;
+    holdSeconds: number;
+    astroidUsd: number;
+    solUsd: number;
+    oracleUpdatedAt: number;
+  };
+  /** Durable raid-wager escrow summary; null when escrow isn't wired. */
+  escrow: { active: number; settling: number; failed: number; outstanding: number } | null;
   network: ReturnType<GameWorld['getNetworkStats']>;
   security: ReturnType<GameWorld['antiCheat']['getStats']>;
   economy: {
@@ -114,6 +143,17 @@ export function buildAdminSnapshot(
     .sort((a, b) => b[1] - a[1]);
   const topBalances = balances.slice(0, 25).map(([wallet, amount]) => ({ wallet, amount }));
 
+  // Holder gate — mirror the live SOL-pegged resolution from server boot so the
+  // console shows the same threshold the gateway is actually enforcing.
+  const oracle = deps.getPriceOracle?.();
+  const astroidUsd = oracle?.getPrice() ?? 0;
+  const solUsd = oracle?.getSolPrice() ?? 0;
+  const pegged = runtime.holderMinSol > 0;
+  const requiredAstroid =
+    pegged && solUsd > 0 && astroidUsd > 0
+      ? (runtime.holderMinSol * solUsd) / astroidUsd
+      : runtime.holderMinBalance;
+
   return {
     ts: Date.now(),
     server: {
@@ -124,6 +164,18 @@ export function buildAdminSnapshot(
       persistence: deps.persistence,
       connected: authed.size,
     },
+    holderGate: {
+      enabled: runtime.chainEnabled,
+      pegged,
+      minSol: runtime.holderMinSol,
+      requiredAstroid,
+      staticFloor: runtime.holderMinBalance,
+      holdSeconds: runtime.holderMinHoldSeconds,
+      astroidUsd,
+      solUsd,
+      oracleUpdatedAt: oracle?.getUpdatedAt() ?? 0,
+    },
+    escrow: deps.escrowManager?.getSummary() ?? null,
     network: world.getNetworkStats(),
     security: world.antiCheat.getStats(),
     economy: {

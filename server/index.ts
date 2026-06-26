@@ -618,6 +618,9 @@ async function main(): Promise<void> {
     quarryEnabled,
     payoutsOnChain,
     startedAt,
+    // Lazy: the oracle is constructed further below; read it at snapshot time.
+    getPriceOracle: () => priceOracle,
+    escrowManager,
   });
   console.info(
     runtime.adminSecret

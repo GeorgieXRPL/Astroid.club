@@ -10,6 +10,8 @@ import { describe, expect, it } from 'vitest';
 import type { AsteroidDefinition } from '../../config/asteroids.js';
 import { LogBuffer } from '../../server/admin/log-buffer.js';
 import { buildAdminSnapshot } from '../../server/admin/admin-snapshot.js';
+import type { EscrowManager } from '../../server/chain/escrow-manager.js';
+import type { PriceOracle } from '../../server/chain/price-oracle.js';
 import type { GameLogger } from '../../server/game/interfaces.js';
 import { GameWorld } from '../../server/game/world.js';
 
@@ -78,6 +80,47 @@ describe('buildAdminSnapshot', () => {
     expect(snap.economy.totalPendingYield).toBe(250);
     expect(snap.economy.walletsWithCredit).toBe(1);
     expect(snap.economy.topBalances[0]).toEqual({ wallet: ALICE, amount: 250 });
+  });
+
+  it('reports the holder gate posture and live oracle prices', async () => {
+    const world = new GameWorld({ asteroids: [HOME], logger: silentLogger, chainEnabled: false });
+    await world.connectPlayer(ALICE);
+    const updatedAt = Date.now() - 30_000;
+    const fakeOracle = {
+      getPrice: () => 0.00005446,
+      getSolPrice: () => 68.23,
+      getUpdatedAt: () => updatedAt,
+    } as unknown as PriceOracle;
+
+    const snap = buildAdminSnapshot({
+      ...makeDeps(world, new LogBuffer()),
+      getPriceOracle: () => fakeOracle,
+    });
+
+    expect(snap.holderGate.enabled).toBe(false); // chain off in this fixture
+    expect(snap.holderGate.astroidUsd).toBe(0.00005446);
+    expect(snap.holderGate.solUsd).toBe(68.23);
+    expect(snap.holderGate.oracleUpdatedAt).toBe(updatedAt);
+    // With HOLDER_MIN_SOL unset (test env default 0), the gate is the static floor.
+    expect(snap.holderGate.pegged).toBe(false);
+    expect(snap.holderGate.requiredAstroid).toBe(snap.holderGate.staticFloor);
+  });
+
+  it('summarises escrow when a manager is wired, and is null otherwise', async () => {
+    const world = new GameWorld({ asteroids: [HOME], logger: silentLogger, chainEnabled: false });
+    await world.connectPlayer(ALICE);
+
+    const noEscrow = buildAdminSnapshot(makeDeps(world, new LogBuffer()));
+    expect(noEscrow.escrow).toBeNull();
+
+    const fakeEscrow = {
+      getSummary: () => ({ active: 2, settling: 1, failed: 0, outstanding: 4200 }),
+    } as unknown as EscrowManager;
+    const withEscrow = buildAdminSnapshot({
+      ...makeDeps(world, new LogBuffer()),
+      escrowManager: fakeEscrow,
+    });
+    expect(withEscrow.escrow).toEqual({ active: 2, settling: 1, failed: 0, outstanding: 4200 });
   });
 
   it('includes recent log events and the last event id', () => {

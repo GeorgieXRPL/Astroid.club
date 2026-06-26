@@ -49,6 +49,7 @@ const DEFAULT_REFRESH_MS = 5 * 60_000;
 export class PriceOracle {
   private price = 0;
   private solPrice = 0;
+  private lastUpdatedAt = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly mint: string;
   private readonly solMint: string | undefined;
@@ -79,6 +80,15 @@ export class PriceOracle {
    */
   getSolPrice(): number {
     return this.solPrice;
+  }
+
+  /**
+   * Epoch ms of the last successful $ASTROID quote (0 if none yet). Lets the
+   * admin console show oracle freshness — a stale feed means the holder gate is
+   * running on the last known peg.
+   */
+  getUpdatedAt(): number {
+    return this.lastUpdatedAt;
   }
 
   /** Fetch once, then poll on the configured interval. */
@@ -123,6 +133,7 @@ export class PriceOracle {
       const usdPrice = body?.[this.mint]?.usdPrice;
       if (typeof usdPrice === 'number' && Number.isFinite(usdPrice) && usdPrice > 0) {
         this.price = usdPrice;
+        this.lastUpdatedAt = Date.now();
         this.onPrice?.(usdPrice);
         this.log.info?.(`[price-oracle] $ASTROID = $${usdPrice} (Jupiter)`);
         return usdPrice;

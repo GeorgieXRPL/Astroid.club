@@ -92,6 +92,8 @@ export const ADMIN_HTML = `<!doctype html>
     <h1>astroid.club <span>admin</span></h1>
     <span class="badge" id="b-chain">chain</span>
     <span class="badge" id="b-quarry">quarry</span>
+    <span class="badge" id="b-payouts">payouts</span>
+    <span class="badge" id="b-gate">gate</span>
     <span class="badge" id="b-persist">persistence</span>
     <span class="badge" id="b-uptime">uptime</span>
     <span class="badge on" id="b-conn">0 online</span>
@@ -102,6 +104,16 @@ export const ADMIN_HTML = `<!doctype html>
   </header>
   <main>
     <div class="cards" id="cards"></div>
+    <div class="grid2">
+      <section>
+        <h2>Holder gate &amp; oracle</h2>
+        <div style="overflow:auto"><table id="gate"></table></div>
+      </section>
+      <section>
+        <h2>Raid-wager escrow</h2>
+        <div style="overflow:auto"><table id="escrow"></table></div>
+      </section>
+    </div>
     <section>
       <h2>Asteroids</h2>
       <div style="overflow:auto"><table id="asteroids"></table></div>
@@ -171,6 +183,14 @@ export const ADMIN_HTML = `<!doctype html>
     if (s < 3600) return Math.round(s / 60) + 'm';
     return Math.round(s / 3600) + 'h';
   }
+  function fmtDur(s) {
+    s = s | 0;
+    if (s >= 86400 && s % 86400 === 0) return (s / 86400) + 'd';
+    if (s >= 3600 && s % 3600 === 0) return (s / 3600) + 'h';
+    if (s >= 60 && s % 60 === 0) return (s / 60) + 'm';
+    return s + 's';
+  }
+  function price(p, dp) { return p > 0 ? '$' + Number(p).toPrecision(dp || 4) : '—'; }
 
   function show(el, on) { document.getElementById(el).style.display = on ? '' : 'none'; }
 
@@ -218,6 +238,16 @@ export const ADMIN_HTML = `<!doctype html>
     var s = d.server;
     badge('b-chain', 'chain: ' + (s.chainEnabled ? 'on' : 'off'), s.chainEnabled ? 'on' : 'off');
     badge('b-quarry', 'quarry: ' + (s.quarryEnabled ? 'on' : 'off'), s.quarryEnabled ? 'on' : 'off');
+    badge('b-payouts', 'payouts: ' + (s.payoutsOnChain ? 'on-chain' : 'iou'), s.payoutsOnChain ? 'on' : '');
+    var hg = d.holderGate || {};
+    if (!hg.enabled) {
+      badge('b-gate', 'gate: dev', 'off');
+    } else {
+      var stale = hg.pegged && hg.oracleUpdatedAt > 0 && (d.ts - hg.oracleUpdatedAt > 15 * 60 * 1000);
+      var noQuote = hg.pegged && hg.oracleUpdatedAt === 0;
+      var gtxt = hg.pegged ? ('gate: ~' + hg.minSol + ' SOL' + (noQuote ? ' (floor)' : '')) : 'gate: ' + num(hg.staticFloor);
+      badge('b-gate', gtxt, (stale || noQuote) ? 'warn' : 'on');
+    }
     badge('b-persist', s.persistence, s.persistence === 'postgres' ? 'on' : 'warn');
     badge('b-uptime', 'up ' + fmtUptime(s.uptimeSec), '');
     badge('b-conn', s.connected + ' online', 'on');
@@ -239,6 +269,13 @@ export const ADMIN_HTML = `<!doctype html>
       cards.push(['Backing headroom', head]);
       if (em.dailyCap > 0) cards.push(['Issued (24h)', num(em.dailyIssued) + ' / ' + num(em.dailyCap)]);
     }
+    if (hg.enabled) {
+      cards.push(['Gate req.', num(Math.round(hg.requiredAstroid))]);
+      cards.push(['Hold window', fmtDur(hg.holdSeconds)]);
+    }
+    if (d.escrow && (d.escrow.outstanding > 0 || d.escrow.failed > 0)) {
+      cards.push(['Escrow out', num(d.escrow.outstanding)]);
+    }
     document.getElementById('cards').innerHTML = cards.map(function (c) {
       return '<div class="card"><div class="k">' + c[0] + '</div><div class="v">' + c[1] + '</div></div>';
     }).join('');
@@ -258,6 +295,39 @@ export const ADMIN_HTML = `<!doctype html>
         num(a.discoveriesFound) + '</td><td>' + (st.join(' ') || '—') + '</td></tr>';
     }).join('');
     document.getElementById('asteroids').innerHTML = ah + '</tbody>';
+
+    var gateRows = [];
+    if (!hg.enabled) {
+      gateRows.push(['Status', 'disabled — dev pass-through (all wallets eligible)']);
+    } else {
+      gateRows.push(['Mode', hg.pegged ? 'SOL-pegged (dynamic)' : 'static floor']);
+      gateRows.push(['Required to enter', num(Math.round(hg.requiredAstroid)) + ' $ASTROID']);
+      if (hg.pegged) gateRows.push(['Peg target', hg.minSol + ' SOL worth']);
+      gateRows.push(['Static floor', num(hg.staticFloor) + ' $ASTROID']);
+      gateRows.push(['Hold window', fmtDur(hg.holdSeconds)]);
+      gateRows.push(['$ASTROID price', price(hg.astroidUsd)]);
+      gateRows.push(['SOL price', price(hg.solUsd, 5)]);
+      gateRows.push(['Oracle updated', hg.oracleUpdatedAt > 0 ? fmtRel(d.ts - hg.oracleUpdatedAt) + ' ago' : 'no quote yet (on floor)']);
+    }
+    document.getElementById('gate').innerHTML = '<tbody>' + gateRows.map(function (r) {
+      return '<tr><td class="muted">' + r[0] + '</td><td class="right">' + esc(r[1]) + '</td></tr>';
+    }).join('') + '</tbody>';
+
+    var escEl = document.getElementById('escrow');
+    if (!d.escrow) {
+      escEl.innerHTML = '<tbody><tr><td class="muted" style="padding:14px">Escrow not wired (chain off or no escrow store).</td></tr></tbody>';
+    } else {
+      var es = d.escrow;
+      var escRows = [
+        ['Outstanding liability', num(es.outstanding) + ' $ASTROID'],
+        ['Active deposits', num(es.active)],
+        ['Settling', num(es.settling)],
+        ['Failed (manual)', es.failed > 0 ? '<span style="color:var(--bad)">' + num(es.failed) + '</span>' : '0']
+      ];
+      escEl.innerHTML = '<tbody>' + escRows.map(function (r) {
+        return '<tr><td class="muted">' + r[0] + '</td><td class="right">' + r[1] + '</td></tr>';
+      }).join('') + '</tbody>';
+    }
 
     var rd = d.raids || { active: [], recent: [] };
     var rah = '<thead><tr><th>Attacker</th><th class="right">Party</th><th>Target</th>' +
