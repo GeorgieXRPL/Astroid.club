@@ -657,7 +657,16 @@ function ConnectedArena({
       const asteroidId = selectedAsteroid.id;
       void runSequence(label, async () => {
         await session.send<void>({ type: 'join_asteroid', asteroidId });
-        await session.send<{ effective: number }>({ type: 'report_drill_power', drillPower });
+        const reply = await session.send<{ effective: number }>({
+          type: 'report_drill_power',
+          drillPower,
+        });
+        // The server clamps the reported drill to the stake bound and applies
+        // the tier multiplier. Snap the input to that server-enforced effective
+        // value so the field never shows an unclamped/wishful number.
+        if (reply && Number.isFinite(reply.effective)) {
+          setDrillPower(reply.effective);
+        }
       });
     },
     [runSequence, selectedAsteroid, session, drillPower],
