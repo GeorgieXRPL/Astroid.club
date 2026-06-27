@@ -390,7 +390,17 @@ Two consequences worth knowing:
   `maxDiscoveriesPerAsteroidPerTick` (1), which saturates at roughly the
   reference drill power. 23M vs 5k mines at the *same* speed — the giant number
   is cosmetic for yield. (The fast-100k issue was emission tuning, now fixed.)
-- **Raids are affected.** `attackPower = drill × 0.5 + stake × 0.1`, so 23M drill
-  → ~12M attack power, letting one whale dominate raids. The `1 drill per staked
-  token` bound is the lever here; lowering `DRILL_BASE_PER_STAKE` or capping
-  effective drill for the raid path is the fix if that imbalance is unwanted.
+- **Raids are soft-capped.** `attackPower = softCapAttackDrill(drill) × 0.5 +
+  stake × 0.1`. Drill once scaled linearly + unbounded (23M drill → ~12M attack
+  power → faceroll). Now, above `RAID_DRILL_SOFTCAP` (5M) each extra point of
+  drill counts at only `RAID_DRILL_SOFTCAP_SLOPE` (0.15) — diminishing returns:
+
+  ```
+  softCapAttackDrill(drill) = drill                              (drill ≤ 5M)
+                            = 5M + (drill − 5M) × 0.15           (drill > 5M)
+  ```
+
+  The 23M whale drops from ~12M to ~4.6M attack power, while a solid Diamond
+  player (< 5M drill) is untouched. Staking more is still always better — it's
+  lucrative to be a whale, just no longer linearly dominant. The stake term is
+  unchanged; `RAID_DRILL_SOFTCAP=0` disables it. Mining/discovery never touched.
