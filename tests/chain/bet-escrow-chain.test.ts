@@ -13,7 +13,7 @@
  *     deposit and rejects failed / forged / underfunded ones.
  */
 
-import { Keypair } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 import type { Connection } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BetEscrowChainService,
   WAGER_MEMO_PREFIX,
+  computeEscrowFee,
   getBetEscrowConfigFromEnv,
 } from '../../server/chain/bet-escrow-chain.js';
 
@@ -28,10 +29,14 @@ const ASTROID_MINT = 'So11111111111111111111111111111111111111112';
 
 const ENV_KEYS = [
   'REDEEMER_TREASURY_PRIVATE_KEY',
+  'ESCROW_PRIVATE_KEY',
   'SOLANA_RPC_URL',
   'ASTROID_MINT_ADDRESS',
   'ASTROID_DECIMALS',
   'REDEEM_PRIORITY_MICROLAMPORTS',
+  'ESCROW_FEE_BPS',
+  'ESCROW_FEE_FLAT',
+  'ESCROW_RENT_BURN_ENABLED',
 ];
 
 let saved: Record<string, string | undefined>;
@@ -86,6 +91,39 @@ describe('getBetEscrowConfigFromEnv', () => {
     expect(config!.astroidDecimals).toBe(6);
     expect(config!.priorityMicroLamports).toBe(5000);
     expect(config!.treasury.publicKey.toBase58()).toBe(kp.publicKey.toBase58());
+    // Fee defaults: 2% + 5000 flat; single-wallet model routes fee to itself.
+    expect(config!.feeBps).toBe(200);
+    expect(config!.feeFlat).toBe(5000);
+    expect(config!.feeDestination.toBase58()).toBe(kp.publicKey.toBase58());
+    expect(config!.rentBurnEnabled).toBe(true);
+  });
+
+  it('routes fee to the redeemer treasury when escrow runs on a dedicated key', () => {
+    const escrowKp = Keypair.generate();
+    const redeemerKp = Keypair.generate();
+    process.env.ESCROW_PRIVATE_KEY = JSON.stringify(Array.from(escrowKp.secretKey));
+    process.env.REDEEMER_TREASURY_PRIVATE_KEY = JSON.stringify(Array.from(redeemerKp.secretKey));
+    process.env.SOLANA_RPC_URL = 'http://127.0.0.1:8899';
+    process.env.ASTROID_MINT_ADDRESS = ASTROID_MINT;
+
+    const config = getBetEscrowConfigFromEnv();
+    // Custody = escrow wallet; fee revenue = mining treasury (separated).
+    expect(config!.treasury.publicKey.toBase58()).toBe(escrowKp.publicKey.toBase58());
+    expect(config!.feeDestination.toBase58()).toBe(redeemerKp.publicKey.toBase58());
+  });
+
+  it('honors fee + rent-burn overrides', () => {
+    setValidTreasury();
+    process.env.SOLANA_RPC_URL = 'http://127.0.0.1:8899';
+    process.env.ASTROID_MINT_ADDRESS = ASTROID_MINT;
+    process.env.ESCROW_FEE_BPS = '100';
+    process.env.ESCROW_FEE_FLAT = '2500';
+    process.env.ESCROW_RENT_BURN_ENABLED = 'false';
+
+    const config = getBetEscrowConfigFromEnv();
+    expect(config!.feeBps).toBe(100);
+    expect(config!.feeFlat).toBe(2500);
+    expect(config!.rentBurnEnabled).toBe(false);
   });
 
   it('honors decimal / priority overrides', () => {
@@ -101,7 +139,11 @@ describe('getBetEscrowConfigFromEnv', () => {
   });
 });
 
-function makeService(treasury: Keypair, connection?: Connection): BetEscrowChainService {
+function makeService(
+  treasury: Keypair,
+  connection?: Connection,
+  fee?: { feeBps?: number; feeFlat?: number; feeDestination?: PublicKey; rentBurnEnabled?: boolean },
+): BetEscrowChainService {
   return new BetEscrowChainService(
     {
       rpcUrl: 'http://127.0.0.1:8899',
@@ -109,6 +151,12 @@ function makeService(treasury: Keypair, connection?: Connection): BetEscrowChain
       astroidDecimals: 6,
       treasury,
       priorityMicroLamports: 5000,
+      // Fee OFF by default so the verify gate tests below stay focused on the
+      // wager leg; fee-specific tests opt in via `fee`.
+      feeBps: fee?.feeBps ?? 0,
+      feeFlat: fee?.feeFlat ?? 0,
+      feeDestination: fee?.feeDestination ?? treasury.publicKey,
+      rentBurnEnabled: fee?.rentBurnEnabled ?? false,
     },
     { connection, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } },
   );
@@ -306,6 +354,98 @@ describe('BetEscrowChainService.verifyDeposit (confirm + memo + balance gate)', 
       }),
     });
     const service = makeService(treasury, conn);
+    expect(await service.verifyDeposit(SIG, USER, 100, RAID)).toBe(false);
+  });
+});
+
+describe('computeEscrowFee', () => {
+  it('is percentage (ceil) + flat', () => {
+    expect(computeEscrowFee(100, 200, 5000)).toBe(5002); // ceil(2) + 5000
+    expect(computeEscrowFee(10000, 200, 0)).toBe(200); // 2% of 10000
+    expect(computeEscrowFee(101, 200, 0)).toBe(3); // ceil(2.02)
+  });
+
+  it('is zero for a non-positive wager', () => {
+    expect(computeEscrowFee(0, 200, 5000)).toBe(0);
+    expect(computeEscrowFee(-5, 200, 5000)).toBe(0);
+  });
+});
+
+describe('BetEscrowChainService.verifyDeposit with a separate fee destination', () => {
+  const SIG = bs58.encode(Keypair.generate().publicKey.toBytes());
+  const RAID = 'raid-fee';
+  const USER = Keypair.generate().publicKey.toBase58();
+  const FEE_DEST = Keypair.generate().publicKey;
+
+  // wager 100 @ 6dp = 100_000_000; fee = 2% + 5000 flat = 5002 → 5_002_000_000.
+  function parsedFeeTx(opts: {
+    treasury: string;
+    treasuryCredit: string;
+    feeCredit: string;
+    userDebit: string;
+    memo?: string;
+  }) {
+    return {
+      meta: {
+        err: null,
+        logMessages: [`Program log: Memo (len): ${opts.memo ?? `${WAGER_MEMO_PREFIX}:${RAID}:100:5002`}`],
+        preTokenBalances: [
+          { owner: opts.treasury, mint: ASTROID_MINT, uiTokenAmount: { amount: '0' } },
+          { owner: FEE_DEST.toBase58(), mint: ASTROID_MINT, uiTokenAmount: { amount: '0' } },
+          { owner: USER, mint: ASTROID_MINT, uiTokenAmount: { amount: '10000000000' } },
+        ],
+        postTokenBalances: [
+          { owner: opts.treasury, mint: ASTROID_MINT, uiTokenAmount: { amount: opts.treasuryCredit } },
+          { owner: FEE_DEST.toBase58(), mint: ASTROID_MINT, uiTokenAmount: { amount: opts.feeCredit } },
+          {
+            owner: USER,
+            mint: ASTROID_MINT,
+            uiTokenAmount: { amount: String(10000000000 - Number(opts.userDebit)) },
+          },
+        ],
+      },
+    };
+  }
+
+  function conn(parsed: unknown): Connection {
+    return {
+      confirmTransaction: vi.fn(async () => ({ value: { err: null } })),
+      getParsedTransaction: vi.fn(async () => parsed),
+    } as unknown as Connection;
+  }
+
+  it('accepts when wager hits escrow exactly AND fee hits the fee wallet exactly', async () => {
+    const treasury = Keypair.generate();
+    const service = makeService(
+      treasury,
+      conn(
+        parsedFeeTx({
+          treasury: treasury.publicKey.toBase58(),
+          treasuryCredit: '100000000', // exactly the wager
+          feeCredit: '5002000000', // exactly the fee
+          userDebit: '5102000000', // wager + fee
+        }),
+      ),
+      { feeBps: 200, feeFlat: 5000, feeDestination: FEE_DEST },
+    );
+    expect(await service.verifyDeposit(SIG, USER, 100, RAID)).toBe(true);
+    expect(service.getFeeSummary().feesCollected).toBe(5002);
+  });
+
+  it('rejects when the fee leg never landed on the fee wallet', async () => {
+    const treasury = Keypair.generate();
+    const service = makeService(
+      treasury,
+      conn(
+        parsedFeeTx({
+          treasury: treasury.publicKey.toBase58(),
+          treasuryCredit: '100000000',
+          feeCredit: '0', // fee dodged
+          userDebit: '100000000',
+        }),
+      ),
+      { feeBps: 200, feeFlat: 5000, feeDestination: FEE_DEST },
+    );
     expect(await service.verifyDeposit(SIG, USER, 100, RAID)).toBe(false);
   });
 });

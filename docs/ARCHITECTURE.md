@@ -247,3 +247,81 @@ For dev, in-memory is enough. For production, a Redis-backed implementation can 
 - **Phase 4 — content.** ⏳ Poker freeroll service. Tournament directors, sponsor pools, leaderboards. PvP arena seasons. PvE world events.
 
 Each phase is intentionally narrow so it can be reviewed in isolation.
+
+---
+
+## Deployment & secret topology
+
+How the running system is wired across hosts, and **where every secret lives**
+(the recurring footgun during key rotation).
+
+```mermaid
+flowchart TB
+  subgraph Vercel["Vercel — astroid.club (Next.js shell)"]
+    FE["Pages: / · /arena · /sign-in · /console · /status"]
+  end
+  subgraph Fly["Fly.io — astroid-club-gw (syd :3002)"]
+    GW["AstroidGateway · WS+HTTP · auth · allowlist"]
+    CHAIN["ChainOps · holder · staking · redeemer · escrow · oracle"]
+    ADMIN["Admin /admin (ADMIN_SECRET)"]
+  end
+  subgraph Data["Supabase Postgres"]
+    DB[("home_stations · yield_events · raid_vaults · escrow_wagers")]
+  end
+  subgraph Ext["External / chain"]
+    HELIUS["Helius RPC + balance + tx"]
+    JUP["Jupiter Price API"]
+    SOL["Solana mainnet · Quarry · $ASTROID"]
+    TREAS["Treasury wallet (redeemer + fee revenue)"]
+    ESCW["Escrow wallet (wager custody)"]
+  end
+  FE -- "wss NEXT_PUBLIC_ASTROID_WS_URL" --> GW
+  FE -- "wallet signs tx via own RPC" --> SOL
+  GW --> CHAIN
+  GW <--> DB
+  CHAIN --> HELIUS
+  CHAIN --> JUP
+  CHAIN --> SOL
+  CHAIN --> TREAS
+  CHAIN --> ESCW
+```
+
+| Secret | Host | Notes |
+| --- | --- | --- |
+| `ADMIN_SECRET`, `HELIUS_API_KEY`, `SOLANA_RPC_URL` | **Fly only** | never on Vercel |
+| `REDEEMER_TREASURY_PRIVATE_KEY`, `ESCROW_PRIVATE_KEY`, `DATABASE_URL` | **Fly only** | hot wallets + DB |
+| `HOLDER_MIN_SOL/BALANCE/HOLD_SECONDS`, `ESCROW_FEE_BPS/FLAT`, `ESCROW_RENT_BURN_ENABLED` | **Fly only** | gate + escrow economics |
+| `NEXT_PUBLIC_*` (WS URL, Privy app id, site URL, chain, arena flag) | **Vercel** | browser-exposed |
+| `NEXT_PUBLIC_SOLANA_RPC_URL` | **Vercel** | dev-keypair path only; prod wallets use their own RPC |
+
+**Rule of thumb:** secret/server-side → **Fly**; `NEXT_PUBLIC_*` → **Vercel**.
+Rotating Helius/Admin/RPC requires **no Vercel change**.
+
+---
+
+## Raid-wager escrow money flow
+
+Custody is the dedicated `ESCROW_PRIVATE_KEY` wallet; the escrow-creation fee
+(protocol revenue) goes to the mining treasury (`REDEEMER_TREASURY_PRIVATE_KEY`).
+
+```mermaid
+flowchart TD
+  P["Player places wager"] --> BD["buildDeposit (player-signed)"]
+  BD --> L1["wager leg → escrow ATA (EXACTLY wager)"]
+  BD --> L2["fee leg → treasury ATA<br/>fee = ceil(wager × ESCROW_FEE_BPS/10000) + ESCROW_FEE_FLAT"]
+  L1 --> V["verifyDeposit<br/>• escrow credited == wager<br/>• fee dest credited == fee<br/>• depositor debited ≥ wager + fee"]
+  L2 --> V
+  V -->|ok| BK["recordBooked (liability) + placeBet"]
+  BK --> R{"raid result"}
+  R -->|win| RET["returnWager → winner (full wager back)"]
+  R -->|loss| BRN["burn 90% + payDefender 10% (stake-weighted)"]
+  RET --> RBN["if recipient ATA created → rent-offset burn<br/>(oracle-priced $ASTROID ≈ 0.002 SOL rent),<br/>surplus-only guard: never touches liability"]
+  BRN --> RBN
+```
+
+- **Fee** (`ESCROW_FEE_BPS` + `ESCROW_FEE_FLAT`, default 2% + 5,000): charged
+  on top, → treasury revenue. The escrow ATA still receives exactly the wager,
+  so the security-critical exact-credit verify gate is unchanged.
+- **Rent-offset burn** (`ESCROW_RENT_BURN_ENABLED`): when the escrow wallet
+  fronts SOL rent for a new recipient ATA, it burns the oracle-priced $ASTROID
+  equivalent from **surplus only** (`balance − outstanding liability ≥ burn`).

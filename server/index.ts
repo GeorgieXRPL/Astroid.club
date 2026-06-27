@@ -351,7 +351,12 @@ async function main(): Promise<void> {
     // treasury key this stays unwired and the escrow ops report `disabled`.
     const betEscrowConfig = getBetEscrowConfigFromEnv();
     if (betEscrowConfig) {
-      const betEscrowChain = new BetEscrowChainService(betEscrowConfig, { logger: console });
+      const betEscrowChain = new BetEscrowChainService(betEscrowConfig, {
+        logger: console,
+        // Lazy: both are assigned later in this boot fn. Read at settlement time.
+        getPriceOracle: () => priceOracle,
+        getOutstandingLiability: () => escrowManager?.outstandingLiability() ?? 0,
+      });
       betEscrowChainSvc = betEscrowChain;
         chainImpls.buildBetEscrowDeposit = async (wallet, amount, raidId) => {
           const built = await betEscrowChain.buildDeposit(wallet, amount, raidId);
@@ -370,9 +375,12 @@ async function main(): Promise<void> {
         betEscrowChain.payDefender(wallet, amount, raidId);
       chainImpls.burnBetEscrow = (amount, raidId) => betEscrowChain.burnWager(amount, raidId);
       betEscrowWired = true;
+      const feeSummary = betEscrowChain.getFeeSummary();
       console.info(
         `[astroid-club] raid-wager escrow wired (escrow=${betEscrowChain.escrowAddress.slice(0, 8)}…). ` +
-          'Wagers escrow on deposit; win returns, loss burns 90% + 10% defender spoils.',
+          'Wagers escrow on deposit; win returns, loss burns 90% + 10% defender spoils. ' +
+          `Creation fee ${feeSummary.feeBps / 100}% + ${feeSummary.feeFlat} $ASTROID flat → treasury; ` +
+          `rent-offset burn ${betEscrowConfig.rentBurnEnabled ? 'ENABLED' : 'disabled'}.`,
       );
     } else {
       console.warn(
@@ -621,6 +629,7 @@ async function main(): Promise<void> {
     // Lazy: the oracle is constructed further below; read it at snapshot time.
     getPriceOracle: () => priceOracle,
     escrowManager,
+    getEscrowFees: () => betEscrowChainSvc?.getFeeSummary() ?? null,
   });
   console.info(
     runtime.adminSecret

@@ -33,6 +33,17 @@ export interface AdminSnapshotDeps {
   getPriceOracle?: () => PriceOracle | undefined;
   /** Durable raid-wager escrow manager, when chain + escrow are wired. */
   escrowManager?: EscrowManager;
+  /**
+   * Escrow chain service fee/deflation snapshot — revenue collected and
+   * $ASTROID burned to offset recipient-ATA rent. Optional accessor so the
+   * admin handler stays decoupled from the chain layer.
+   */
+  getEscrowFees?: () => {
+    feeBps: number;
+    feeFlat: number;
+    feesCollected: number;
+    rentBurned: number;
+  } | null;
 }
 
 export interface AdminPlayer {
@@ -80,8 +91,20 @@ export interface AdminSnapshot {
     solUsd: number;
     oracleUpdatedAt: number;
   };
-  /** Durable raid-wager escrow summary; null when escrow isn't wired. */
-  escrow: { active: number; settling: number; failed: number; outstanding: number } | null;
+  /**
+   * Durable raid-wager escrow summary; null when escrow isn't wired. When the
+   * chain fee service is wired, `fees` carries the creation-fee config plus
+   * running revenue (`feesCollected`) and rent-offset deflation (`rentBurned`).
+   */
+  escrow:
+    | {
+        active: number;
+        settling: number;
+        failed: number;
+        outstanding: number;
+        fees?: { feeBps: number; feeFlat: number; feesCollected: number; rentBurned: number } | null;
+      }
+    | null;
   network: ReturnType<GameWorld['getNetworkStats']>;
   security: ReturnType<GameWorld['antiCheat']['getStats']>;
   economy: {
@@ -175,7 +198,9 @@ export function buildAdminSnapshot(
       solUsd,
       oracleUpdatedAt: oracle?.getUpdatedAt() ?? 0,
     },
-    escrow: deps.escrowManager?.getSummary() ?? null,
+    escrow: deps.escrowManager
+      ? { ...deps.escrowManager.getSummary(), fees: deps.getEscrowFees?.() ?? null }
+      : null,
     network: world.getNetworkStats(),
     security: world.antiCheat.getStats(),
     economy: {

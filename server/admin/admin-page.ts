@@ -324,6 +324,11 @@ export const ADMIN_HTML = `<!doctype html>
         ['Settling', num(es.settling)],
         ['Failed (manual)', es.failed > 0 ? '<span style="color:var(--bad)">' + num(es.failed) + '</span>' : '0']
       ];
+      if (es.fees) {
+        escRows.push(['Creation fee', (es.fees.feeBps / 100) + '% + ' + num(es.fees.feeFlat) + ' flat']);
+        escRows.push(['Fees collected', num(es.fees.feesCollected) + ' $ASTROID']);
+        escRows.push(['Rent-offset burned', num(es.fees.rentBurned) + ' $ASTROID']);
+      }
       escEl.innerHTML = '<tbody>' + escRows.map(function (r) {
         return '<tr><td class="muted">' + r[0] + '</td><td class="right">' + r[1] + '</td></tr>';
       }).join('') + '</tbody>';

@@ -120,7 +120,27 @@ describe('buildAdminSnapshot', () => {
       ...makeDeps(world, new LogBuffer()),
       escrowManager: fakeEscrow,
     });
-    expect(withEscrow.escrow).toEqual({ active: 2, settling: 1, failed: 0, outstanding: 4200 });
+    // No fee accessor → fees null, summary fields passed through.
+    expect(withEscrow.escrow).toEqual({
+      active: 2,
+      settling: 1,
+      failed: 0,
+      outstanding: 4200,
+      fees: null,
+    });
+
+    const withFees = buildAdminSnapshot({
+      ...makeDeps(world, new LogBuffer()),
+      escrowManager: fakeEscrow,
+      getEscrowFees: () => ({ feeBps: 200, feeFlat: 5000, feesCollected: 12, rentBurned: 3 }),
+    });
+    expect(withFees.escrow).toEqual({
+      active: 2,
+      settling: 1,
+      failed: 0,
+      outstanding: 4200,
+      fees: { feeBps: 200, feeFlat: 5000, feesCollected: 12, rentBurned: 3 },
+    });
   });
 
   it('includes recent log events and the last event id', () => {
