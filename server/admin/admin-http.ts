@@ -28,10 +28,51 @@ function tokenValid(provided: string | undefined, secret: string | undefined): b
   return timingSafeEqual(a, b);
 }
 
-function extractToken(req: IncomingMessage, url: URL): string | undefined {
+function extractToken(req: IncomingMessage): string | undefined {
   const auth = req.headers.authorization;
   if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
-  return url.searchParams.get('token') ?? undefined;
+  // Header-only: no `?token=` query fallback. Query strings leak into access
+  // logs, reverse proxies, browser history, and Referer headers — the
+  // dashboard always sends the secret as an `Authorization: Bearer`.
+  return undefined;
+}
+
+/**
+ * Best-effort real client IP for per-IP auth lockout. Prefers Fly's edge-set
+ * `Fly-Client-IP` (clients can't spoof it past the proxy), then the first
+ * `X-Forwarded-For` hop, then the raw socket address. Bucketing by client IP
+ * keeps one abuser from locking the operator out via the shared proxy IP.
+ */
+function clientIp(req: IncomingMessage): string {
+  const fly = req.headers['fly-client-ip'];
+  if (typeof fly === 'string' && fly.length > 0) return fly;
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length > 0) return xff.split(',')[0]!.trim();
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+/**
+ * Admin auth brute-force backoff. After {@link ADMIN_MAX_FAILS} failed token
+ * checks from one client IP, that IP is locked out for an escalating window
+ * (doubling from {@link ADMIN_LOCK_BASE_MS}, capped at {@link ADMIN_LOCK_MAX_MS}).
+ * A correct token clears the IP's state immediately. State is in-memory and
+ * size-capped — pure defense-in-depth atop a high-entropy secret.
+ */
+const ADMIN_MAX_FAILS = 5;
+const ADMIN_LOCK_BASE_MS = 30_000;
+const ADMIN_LOCK_MAX_MS = 15 * 60 * 1000;
+const ADMIN_STATE_TTL_MS = 30 * 60 * 1000;
+const ADMIN_STATE_MAX = 10_000;
+
+interface AdminAuthState {
+  /** Consecutive failures since the last lock/success. */
+  fails: number;
+  /** Epoch ms until which this IP is locked out (0 = not locked). */
+  lockedUntil: number;
+  /** How many times this IP has been locked (drives escalating duration). */
+  lockTier: number;
+  /** Last-touched epoch ms (for idle pruning). */
+  seen: number;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -51,7 +92,15 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 export function createAdminHandler(
   deps: AdminSnapshotDeps,
 ): (req: IncomingMessage, res: ServerResponse, url: URL) => boolean {
-  let failedAttempts = 0;
+  // Per-IP auth-failure state for brute-force backoff. Bounded + idle-pruned.
+  const authState = new Map<string, AdminAuthState>();
+
+  const pruneAuthState = (now: number): void => {
+    if (authState.size < ADMIN_STATE_MAX) return;
+    for (const [ip, s] of authState) {
+      if (s.lockedUntil < now && now - s.seen > ADMIN_STATE_TTL_MS) authState.delete(ip);
+    }
+  };
 
   return (req, res, url) => {
     if (url.pathname !== '/admin' && !url.pathname.startsWith('/admin/')) return false;
@@ -74,15 +123,45 @@ export function createAdminHandler(
 
     // Everything under /admin/api/* requires the token.
     if (url.pathname.startsWith('/admin/api/')) {
-      if (!tokenValid(extractToken(req, url), runtime.adminSecret)) {
-        failedAttempts += 1;
+      const ip = clientIp(req);
+      const now = Date.now();
+      const st = authState.get(ip);
+
+      // Locked out → 429 with Retry-After; don't even compare the token.
+      if (st && st.lockedUntil > now) {
+        const retryMs = st.lockedUntil - now;
+        res.writeHead(429, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Retry-After': String(Math.ceil(retryMs / 1000)),
+        });
+        res.end(JSON.stringify({ error: 'too_many_attempts', retryAfterMs: retryMs }));
+        return true;
+      }
+
+      if (!tokenValid(extractToken(req), runtime.adminSecret)) {
+        const tier = st?.lockTier ?? 0;
+        const fails = (st?.fails ?? 0) + 1;
+        let lockedUntil = 0;
+        let lockTier = tier;
+        if (fails >= ADMIN_MAX_FAILS) {
+          lockedUntil = now + Math.min(ADMIN_LOCK_MAX_MS, ADMIN_LOCK_BASE_MS * 2 ** tier);
+          lockTier = tier + 1;
+        }
+        // After a lock trips, reset the counter so the next window starts fresh
+        // (but keep the higher tier so repeat offenders are locked longer).
+        authState.set(ip, { fails: lockedUntil ? 0 : fails, lockedUntil, lockTier, seen: now });
+        pruneAuthState(now);
         console.warn(
-          `[admin] unauthorized ${url.pathname} from ${req.socket.remoteAddress ?? 'unknown'} ` +
-            `(attempt #${failedAttempts})`,
+          `[admin] unauthorized ${url.pathname} from ${ip} (fail ${fails}` +
+            `${lockedUntil ? `, locked ${Math.ceil((lockedUntil - now) / 1000)}s` : ''})`,
         );
         json(res, 401, { error: 'unauthorized' });
         return true;
       }
+
+      // Correct token → clear any failure/lock state for this IP.
+      if (st) authState.delete(ip);
 
       if (url.pathname === '/admin/api/snapshot') {
         const sinceEventId = Number(url.searchParams.get('sinceEventId') ?? '0') || 0;
