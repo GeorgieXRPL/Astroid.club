@@ -61,6 +61,15 @@ kill_timeout = "10s"
   DRILL_BASE_FREE = "5000"
   DRILL_BASE_PER_STAKE = "1"
 
+  # -- raid attack-power soft cap (whale balancing) ---------------------------
+  # Mining is rate-capped, so huge drill is cosmetic there — but attack power
+  # (drill x 0.5 + stake x 0.1) scaled linearly + unbounded, so one large stake
+  # could faceroll raids. Above RAID_DRILL_SOFTCAP, each extra point of drill
+  # counts at only RAID_DRILL_SOFTCAP_SLOPE (diminishing returns): staking more
+  # is still always better, just sub-linear. Set RAID_DRILL_SOFTCAP=0 to disable.
+  RAID_DRILL_SOFTCAP = "5000000"
+  RAID_DRILL_SOFTCAP_SLOPE = "0.15"
+
 [[services]]
   protocol = "tcp"
   internal_port = 3002

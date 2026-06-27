@@ -675,11 +675,50 @@ export function calculateDefensePower(stakeAmount: number, isHomeStation: boolea
 }
 
 /**
- * Calculate attack power. Math byte-identical to BG: half drill power
- * plus 10% of stake.
+ * Raid attack-power soft cap (whale balancing).
+ *
+ * Attack power is `drill × 0.5 + stake × 0.1`. Mining is rate-capped, so a
+ * whale's enormous drill is cosmetic there — but attack power scaled linearly
+ * and *unbounded* with the stake-driven drill bound, letting one large stake
+ * faceroll raids (e.g. a 7.6M stake → 23M drill → ~12M attack power).
+ *
+ * Above `softCap`, each extra point of effective drill contributes at only
+ * `slope` (diminishing returns). Staking more is still always better (lucrative
+ * to be a whale), just no longer linearly dominant. `softCap <= 0` disables it.
+ * Both knobs are env-overridable (`RAID_DRILL_SOFTCAP`, `RAID_DRILL_SOFTCAP_SLOPE`).
+ */
+let raidDrillSoftCap = envNum('RAID_DRILL_SOFTCAP', 5_000_000);
+let raidDrillSoftCapSlope = envNum('RAID_DRILL_SOFTCAP_SLOPE', 0.15);
+
+/** Override the raid drill soft cap (tests / runtime retune). */
+export function setRaidDrillSoftCap(softCap: number, slope?: number): void {
+  if (Number.isFinite(softCap) && softCap >= 0) raidDrillSoftCap = softCap;
+  if (slope !== undefined && Number.isFinite(slope) && slope >= 0) raidDrillSoftCapSlope = slope;
+}
+
+/** Current raid drill soft-cap config (display / admin). */
+export function getRaidDrillSoftCap(): { softCap: number; slope: number } {
+  return { softCap: raidDrillSoftCap, slope: raidDrillSoftCapSlope };
+}
+
+/**
+ * Apply diminishing returns to effective drill power above the soft cap, for
+ * the raid (attack-power) path ONLY. Mining/discovery is never touched.
+ */
+export function softCapAttackDrill(effectiveDrillPower: number): number {
+  if (raidDrillSoftCap <= 0 || effectiveDrillPower <= raidDrillSoftCap) {
+    return effectiveDrillPower;
+  }
+  return raidDrillSoftCap + (effectiveDrillPower - raidDrillSoftCap) * raidDrillSoftCapSlope;
+}
+
+/**
+ * Calculate attack power: half (soft-capped) drill power plus 10% of stake.
+ * Drill above `RAID_DRILL_SOFTCAP` is compressed (see `softCapAttackDrill`) so
+ * whales stay strongest without being unbeatable; the stake term is untouched.
  */
 export function calculateAttackPower(effectiveDrillPower: number, stakeAmount: number): number {
-  return effectiveDrillPower * 0.5 + stakeAmount * 0.1;
+  return softCapAttackDrill(effectiveDrillPower) * 0.5 + stakeAmount * 0.1;
 }
 
 /**

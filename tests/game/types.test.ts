@@ -15,11 +15,14 @@ import {
   calculateEffectiveDrillPower,
   calculateSyndicateMultiplier,
   getAstroidUsdPrice,
+  getRaidDrillSoftCap,
   getStakeTier,
   getStakeTierProgress,
   rollSolarFlareMultiplier,
   rollStellarStrikeJackpot,
   setAstroidUsdPrice,
+  setRaidDrillSoftCap,
+  softCapAttackDrill,
 } from '../../server/game/types.js';
 
 describe('STAKE_TIERS — exact values from BG', () => {
@@ -117,11 +120,50 @@ describe('calculateDefensePower', () => {
 });
 
 describe('calculateAttackPower', () => {
-  it('returns half drill power plus 10% of stake', () => {
+  it('returns half drill power plus 10% of stake (below soft cap)', () => {
     expect(calculateAttackPower(200, 1000)).toBeCloseTo(200);
     expect(calculateAttackPower(0, 0)).toBe(0);
     expect(calculateAttackPower(100, 0)).toBeCloseTo(50);
     expect(calculateAttackPower(0, 100)).toBeCloseTo(10);
+  });
+});
+
+describe('raid drill soft cap (whale balancing)', () => {
+  const original = getRaidDrillSoftCap();
+  afterEach(() => {
+    setRaidDrillSoftCap(original.softCap, original.slope);
+  });
+
+  it('defaults to 5M knee / 0.15 slope', () => {
+    expect(original.softCap).toBe(5_000_000);
+    expect(original.slope).toBeCloseTo(0.15);
+  });
+
+  it('passes drill through unchanged at or below the soft cap', () => {
+    setRaidDrillSoftCap(5_000_000, 0.15);
+    expect(softCapAttackDrill(0)).toBe(0);
+    expect(softCapAttackDrill(1_000_000)).toBe(1_000_000);
+    expect(softCapAttackDrill(5_000_000)).toBe(5_000_000);
+  });
+
+  it('compresses drill above the soft cap with diminishing returns', () => {
+    setRaidDrillSoftCap(5_000_000, 0.15);
+    // 23M drill → 5M + (23M - 5M) * 0.15 = 5M + 2.7M = 7.7M
+    expect(softCapAttackDrill(23_000_000)).toBeCloseTo(7_700_000);
+    // attack power for the 23M-drill / 7.66M-stake whale: 7.7M*0.5 + 7.66M*0.1
+    expect(calculateAttackPower(23_000_000, 7_660_000)).toBeCloseTo(4_616_000);
+  });
+
+  it('stays monotonic — more drill is always (slightly) more attack power', () => {
+    setRaidDrillSoftCap(5_000_000, 0.15);
+    expect(softCapAttackDrill(10_000_000)).toBeGreaterThan(softCapAttackDrill(8_000_000));
+    expect(softCapAttackDrill(50_000_000)).toBeGreaterThan(softCapAttackDrill(23_000_000));
+  });
+
+  it('can be disabled with softCap <= 0', () => {
+    setRaidDrillSoftCap(0);
+    expect(softCapAttackDrill(23_000_000)).toBe(23_000_000);
+    expect(calculateAttackPower(23_000_000, 0)).toBeCloseTo(11_500_000);
   });
 });
 
