@@ -325,3 +325,72 @@ flowchart TD
 - **Rent-offset burn** (`ESCROW_RENT_BURN_ENABLED`): when the escrow wallet
   fronts SOL rent for a new recipient ATA, it burns the oracle-priced $ASTROID
   equivalent from **surplus only** (`balance − outstanding liability ≥ burn`).
+
+## Mining economy & emission control
+
+Issuance can never outrun what the treasury can actually pay out. The budget is
+**pegged to the live redeemer-treasury balance**, not a static number.
+
+```mermaid
+flowchart TD
+  subgraph LOOP["per-tick mining loop (GameWorld)"]
+    DE["DiscoveryEngine<br/>rate ∝ drillPower / reference,<br/>capped at maxDiscoveriesPerAsteroidPerTick (1)"]
+    YO["YieldOrchestrator<br/>gross = baseYield(50) × resource × asteroid × variance"]
+    DE --> YO
+  end
+
+  subgraph GOV["EmissionGovernor (throttle)"]
+    B["budget()"]
+    DC["dailyCap 250k / rolling 24h"]
+    TP["backing taper:<br/>scale → 0 as outstanding liability<br/>nears budget (taper frac 0.25)"]
+    B --> TP
+  end
+
+  TBP["TreasuryBackingPoller<br/>reads treasury $ASTROID on interval"] -->|"balance × 0.8"| B
+  FLOOR["EMISSION_BUDGET (static floor = 0)<br/>used only pre-first-poll / chain off"] -.fallback.-> B
+
+  YO -->|"gross yield"| GOV
+  GOV -->|"net (min of taper-scaled & cap-limited)"| PAY["credited to miners<br/>(20% → raid vault, rest → miner pool/refinery/finder)"]
+  PAY --> LIAB["outstanding liability ↑"]
+  LIAB -. feeds back .-> TP
+
+  style GOV fill:#1d2433,stroke:#4a5568,color:#e2e8f0
+  style TBP fill:#13241d,stroke:#2f855a,color:#e2e8f0
+```
+
+- **Dynamic budget**: `TreasuryBackingPoller` reads the redeemer treasury balance
+  on an interval; `budget = balance × EMISSION_BACKING_FRACTION` (0.8). As
+  liability approaches 80% of payable reserves, issuance tapers to zero; as the
+  treasury is topped up, headroom re-opens automatically — so it scales from a
+  handful of testers to 100+ wallets without a manual retune.
+- **Daily cap** (`EMISSION_DAILY_CAP` = 250k): a rolling-24h hard ceiling that
+  smooths bursts even when backing headroom exists.
+- **Base yield** (`YIELD_BASE_PER_DISCOVERY` = 50): the pre-multiplier reward per
+  discovery (was 100).
+
+### Drill power & the "23M" question
+
+Effective drill power is **not** a free number — it is bounded by stake and then
+scaled by the stake tier:
+
+```
+boundedBase = min(self_reported, DRILL_BASE_FREE + stake × DRILL_BASE_PER_STAKE)
+            = min(self_reported, 5000 + stake × 1)
+effective   = boundedBase × tierMultiplier        # Diamond = 3.0×
+```
+
+So a **23,000,000** effective drill reading implies `boundedBase ≈ 7.67M`, i.e.
+the wallet **staked ~7.66M $ASTROID** (`23M / 3 − 5000`). Given the anti-spoof
+bound is on, that number is *accurate for Diamond tier with a large stake* — it
+is not an exploit of the self-reported value.
+
+Two consequences worth knowing:
+
+- **Mining is unaffected above ~5k drill.** Discovery rate is capped at
+  `maxDiscoveriesPerAsteroidPerTick` (1), which saturates at roughly the
+  reference drill power. 23M vs 5k mines at the *same* speed — the giant number
+  is cosmetic for yield. (The fast-100k issue was emission tuning, now fixed.)
+- **Raids are affected.** `attackPower = drill × 0.5 + stake × 0.1`, so 23M drill
+  → ~12M attack power, letting one whale dominate raids. The `1 drill per staked
+  token` bound is the lever here; lowering `DRILL_BASE_PER_STAKE` or capping
+  effective drill for the raid path is the fix if that imbalance is unwanted.
