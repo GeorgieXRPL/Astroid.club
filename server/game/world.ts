@@ -475,7 +475,10 @@ export class GameWorld {
     // throttle is actually configured, so default/test worlds issue at full
     // rate unless told otherwise.
     const governor =
-      config.emission && (config.emission.budget > 0 || (config.emission.dailyCap ?? 0) > 0)
+      config.emission &&
+      (config.emission.budget > 0 ||
+        (config.emission.dailyCap ?? 0) > 0 ||
+        config.emission.getBudget !== undefined)
         ? new EmissionGovernor(config.emission)
         : undefined;
     this.yieldOrchestrator = new YieldOrchestrator({

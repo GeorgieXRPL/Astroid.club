@@ -72,6 +72,42 @@ describe('EmissionGovernor', () => {
     });
   });
 
+  describe('dynamic budget (treasury peg)', () => {
+    it('uses the dynamic budget over the static floor when it returns > 0', () => {
+      let backing = 2000;
+      const g = new EmissionGovernor({
+        budget: 1000, // static floor
+        taperFraction: 0.25,
+        getBudget: () => backing,
+      });
+      // Pegged to 2000: band = 500, full until outstanding 1500.
+      expect(g.scale(1500)).toBe(1);
+      expect(g.scale(1750)).toBeCloseTo(0.5, 5);
+      expect(g.scale(2000)).toBe(0);
+
+      // Treasury drawn down to 1200: budget shrinks, taper bites sooner.
+      backing = 1200;
+      expect(g.scale(1100)).toBeCloseTo((1200 - 1100) / (1200 * 0.25), 5);
+      expect(g.scale(1200)).toBe(0);
+    });
+
+    it('falls back to the static floor when the dynamic budget is 0 (pre-poll)', () => {
+      const g = new EmissionGovernor({
+        budget: 1000,
+        taperFraction: 0.25,
+        getBudget: () => 0, // not polled yet
+      });
+      expect(g.scale(500)).toBe(1);
+      expect(g.scale(1000)).toBe(0); // static floor still protects
+    });
+
+    it('is enabled whenever a dynamic budget accessor is wired', () => {
+      const g = new EmissionGovernor({ budget: 0, dailyCap: 0, getBudget: () => 5000 });
+      expect(g.enabled).toBe(true);
+      expect(g.getStatus(0).budget).toBe(5000);
+    });
+  });
+
   describe('getStatus', () => {
     it('reports headroom, scale, and daily issuance', () => {
       const now = 0;

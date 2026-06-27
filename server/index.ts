@@ -41,7 +41,8 @@ import { OnChainHoldEstimator } from './chain/prewarm.js';
 import { PriceOracle, WRAPPED_SOL_MINT } from './chain/price-oracle.js';
 import { BetEscrowChainService, getBetEscrowConfigFromEnv } from './chain/bet-escrow-chain.js';
 import { EscrowManager } from './chain/escrow-manager.js';
-import { RedeemerService, getRedeemerConfigFromEnv } from './chain/redeemer.js';
+import { RedeemerService, getRedeemerConfigFromEnv, loadTreasuryKeypair } from './chain/redeemer.js';
+import { TreasuryBackingPoller } from './chain/treasury-backing.js';
 import { RewardPayoutAdapter, getRewardConfigFromEnv } from './chain/rewards.js';
 import { QuarryStakingAdapter, getQuarryConfigFromEnv } from './chain/staking.js';
 import { runtime } from './config/runtime.js';
@@ -423,12 +424,51 @@ async function main(): Promise<void> {
   // Both default to 0 (off) so behaviour is unchanged until an operator opts
   // in by sizing EMISSION_BUDGET to the funded backing. YIELD_BASE_PER_DISCOVERY
   // retunes the base reward without touching code.
+  // Static budget FLOOR (0 = none). The live budget is normally pegged to the
+  // treasury (below); this only applies before the first balance poll / when
+  // chain is off.
   const emissionBudget = Number(process.env.EMISSION_BUDGET ?? '0');
-  const emissionDailyCap = Number(process.env.EMISSION_DAILY_CAP ?? '0');
+  // Rolling 24h global issuance cap. Defaults to 250k to smooth bursts at the
+  // current treasury scale; raise via env as the userbase + treasury grow.
+  const emissionDailyCap = Number(process.env.EMISSION_DAILY_CAP ?? '250000');
   const emissionTaperFraction = Number(process.env.EMISSION_TAPER_FRACTION ?? '0.25');
-  const baseYieldPerDiscovery = process.env.YIELD_BASE_PER_DISCOVERY
-    ? Number(process.env.YIELD_BASE_PER_DISCOVERY)
-    : undefined;
+  // Fraction of the live treasury balance exposed as the backing budget (20%
+  // safety buffer by default). Pegging issuance to real reserves is what keeps
+  // the economy solvent as it scales from ~10 to 100+ miners.
+  const emissionBackingFraction = Number(process.env.EMISSION_BACKING_FRACTION ?? '0.8');
+  // Base reward per discovery, before resource/asteroid multipliers + variance.
+  // Default 50 (halved from the legacy 100) to slow accumulation.
+  const baseYieldRaw = Number(process.env.YIELD_BASE_PER_DISCOVERY ?? '50');
+  const baseYieldPerDiscovery = Number.isFinite(baseYieldRaw) && baseYieldRaw > 0 ? baseYieldRaw : 50;
+
+  // Dynamic backing: poll the redeemer treasury's $ASTROID balance and expose
+  // `balance × fraction` as the governor's budget, so issuance tapers toward
+  // zero as outstanding liability approaches what the treasury can actually
+  // pay. Only when chain + treasury + mint are configured.
+  let treasuryBackingPoller: TreasuryBackingPoller | undefined;
+  if (
+    runtime.chainEnabled &&
+    process.env.SOLANA_RPC_URL &&
+    process.env.ASTROID_MINT_ADDRESS &&
+    process.env.REDEEMER_TREASURY_PRIVATE_KEY
+  ) {
+    try {
+      treasuryBackingPoller = new TreasuryBackingPoller({
+        rpcUrl: process.env.SOLANA_RPC_URL,
+        astroidMint: process.env.ASTROID_MINT_ADDRESS,
+        astroidDecimals: Number(process.env.ASTROID_DECIMALS ?? '6'),
+        treasury: loadTreasuryKeypair('REDEEMER_TREASURY_PRIVATE_KEY').publicKey,
+        fraction: emissionBackingFraction,
+        logger: console,
+      });
+    } catch (err) {
+      console.warn(
+        '[astroid-club] treasury backing poller not wired: ' +
+          `${err instanceof Error ? err.message : String(err)}. Emission budget falls back to ` +
+          'EMISSION_BUDGET.',
+      );
+    }
+  }
   // Percent of each discovery routed into the persistent, raidable raid vault
   // (the asteroid "treasury"); the rest is paid to miners per-discovery.
   const raidVaultPercent = process.env.RAID_VAULT_PERCENT
@@ -544,6 +584,7 @@ async function main(): Promise<void> {
       budget: emissionBudget,
       dailyCap: emissionDailyCap,
       taperFraction: emissionTaperFraction,
+      ...(treasuryBackingPoller && { getBudget: () => treasuryBackingPoller!.current() }),
     },
     homeStationStore,
     pendingYieldStore,
@@ -592,11 +633,21 @@ async function main(): Promise<void> {
   } else {
     console.info('[astroid-club] drill-power bound disabled (self-reported drill is unbounded).');
   }
-  if (emissionBudget > 0 || emissionDailyCap > 0) {
+  if (treasuryBackingPoller) {
+    await treasuryBackingPoller.start();
+    const backing = treasuryBackingPoller.getBalanceTokens();
+    console.info(
+      `[astroid-club] emission governor ENABLED — budget PEGGED to treasury ` +
+        `(${Math.floor(backing).toLocaleString()} $ASTROID × ${emissionBackingFraction} = ` +
+        `${Math.floor(backing * emissionBackingFraction).toLocaleString()} backing); ` +
+        `dailyCap=${emissionDailyCap || '∞'}, taper=${emissionTaperFraction}, ` +
+        `baseYield=${baseYieldPerDiscovery}/discovery.`,
+    );
+  } else if (emissionBudget > 0 || emissionDailyCap > 0) {
     console.info(
       `[astroid-club] emission governor ENABLED ` +
-        `(budget=${emissionBudget || '∞'}, dailyCap=${emissionDailyCap || '∞'}, ` +
-        `taper=${emissionTaperFraction}).`,
+        `(static budget=${emissionBudget || '∞'}, dailyCap=${emissionDailyCap || '∞'}, ` +
+        `taper=${emissionTaperFraction}, baseYield=${baseYieldPerDiscovery}/discovery).`,
     );
   } else {
     console.info('[astroid-club] emission governor disabled (set EMISSION_BUDGET to enable).');
@@ -706,6 +757,7 @@ async function main(): Promise<void> {
     console.info(`[astroid-club] received ${signal}; shutting down…`);
     gateway.stop();
     priceOracle?.stop();
+    treasuryBackingPoller?.stop();
     void postgresStore?.close();
     void redisStore?.close();
     httpServer.close(() => process.exit(0));

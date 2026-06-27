@@ -25,15 +25,24 @@
  */
 export interface EmissionGovernorConfig {
   /**
-   * Max outstanding (unredeemed) credit liability before issuance fully
+   * Static max outstanding (unredeemed) credit liability before issuance fully
    * stops, in $ASTROID credit units. Size this to the treasury backing you
-   * have funded. 0 disables the backing taper.
+   * have funded. 0 disables the static backing taper. Acts as the FLOOR /
+   * fallback when `getBudget` is supplied but hasn't produced a value yet.
    */
   budget: number;
   /**
-   * Fraction of `budget` over which yield tapers from full → zero. e.g. 0.25
-   * means full yield until liability reaches 75% of budget, then linear
-   * down to 0 at 100%. Clamped to (0, 1]. Default 0.25.
+   * Optional DYNAMIC budget accessor. When supplied and it returns a positive
+   * value, it overrides the static `budget` on every evaluation — used to peg
+   * the backing taper to the LIVE treasury balance (e.g. treasury $ASTROID ×
+   * 0.8) so issuance automatically tracks payable reserves as the treasury
+   * grows or is drawn down. Returns ≤ 0 → fall back to the static `budget`.
+   */
+  getBudget?: () => number;
+  /**
+   * Fraction of the (effective) budget over which yield tapers from full →
+   * zero. e.g. 0.25 means full yield until liability reaches 75% of budget,
+   * then linear down to 0 at 100%. Clamped to (0, 1]. Default 0.25.
    */
   taperFraction?: number;
   /**
@@ -62,7 +71,8 @@ export interface EmissionStatus {
 }
 
 export class EmissionGovernor {
-  private readonly budget: number;
+  private readonly staticBudget: number;
+  private readonly getBudget?: () => number;
   private readonly taperFraction: number;
   private readonly dailyCap: number;
   private readonly now: () => number;
@@ -72,16 +82,29 @@ export class EmissionGovernor {
   private windowSum = 0;
 
   constructor(config: EmissionGovernorConfig) {
-    this.budget = Math.max(0, config.budget);
+    this.staticBudget = Math.max(0, config.budget);
+    this.getBudget = config.getBudget;
     const tf = config.taperFraction ?? 0.25;
     this.taperFraction = Math.min(1, Math.max(0.0001, tf));
     this.dailyCap = Math.max(0, config.dailyCap ?? 0);
     this.now = config.now ?? Date.now;
   }
 
+  /**
+   * Effective backing budget: the live dynamic value when wired and positive,
+   * otherwise the static floor.
+   */
+  private budget(): number {
+    if (this.getBudget) {
+      const dynamic = this.getBudget();
+      if (Number.isFinite(dynamic) && dynamic > 0) return dynamic;
+    }
+    return this.staticBudget;
+  }
+
   /** True if either throttle is active. */
   get enabled(): boolean {
-    return this.budget > 0 || this.dailyCap > 0;
+    return this.getBudget !== undefined || this.staticBudget > 0 || this.dailyCap > 0;
   }
 
   /**
@@ -110,21 +133,23 @@ export class EmissionGovernor {
 
   getStatus(outstanding: number): EmissionStatus {
     this.prune(this.now());
+    const budget = this.budget();
     return {
       scale: this.scale(outstanding),
       outstanding,
-      budget: this.budget,
-      headroom: this.budget > 0 ? Math.max(0, this.budget - outstanding) : Infinity,
+      budget,
+      headroom: budget > 0 ? Math.max(0, budget - outstanding) : Infinity,
       dailyIssued: this.windowSum,
       dailyCap: this.dailyCap,
     };
   }
 
   private backingScale(outstanding: number): number {
-    if (this.budget <= 0) return 1;
-    const headroom = this.budget - outstanding;
+    const budget = this.budget();
+    if (budget <= 0) return 1;
+    const headroom = budget - outstanding;
     if (headroom <= 0) return 0;
-    const band = this.budget * this.taperFraction;
+    const band = budget * this.taperFraction;
     if (headroom >= band) return 1;
     return headroom / band;
   }
