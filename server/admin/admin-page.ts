@@ -144,7 +144,7 @@ export const ADMIN_HTML = `<!doctype html>
         <div style="overflow:auto; max-height:420px"><table id="players"></table></div>
       </section>
       <section>
-        <h2>Top IOU credit balances</h2>
+        <h2>Top Astroid Creds balances</h2>
         <div style="overflow:auto; max-height:420px"><table id="economy"></table></div>
       </section>
     </div>
@@ -257,7 +257,7 @@ export const ADMIN_HTML = `<!doctype html>
     var cards = [
       ['Miners', num(n.totalMiners)], ['Drill power', num(n.totalDrillPower)],
       ['Active expeditions', num(n.activeExpeditions)], ['Discoveries', num(n.totalDiscoveries)],
-      ['Claimable IOU', num(ec.totalPendingYield)], ['Lifetime earned', num(ec.totalEarned)],
+      ['Claimable Creds', num(ec.totalPendingYield)], ['Lifetime earned', num(ec.totalEarned)],
       ['Lifetime claimed', num(ec.totalRedeemed)], ['Wallets w/ credit', num(ec.walletsWithCredit)],
       ['Flagged wallets', num(sec.flaggedWallets)], ['Suspicious today', num(sec.suspiciousEventsToday)]
     ];
@@ -415,7 +415,7 @@ export const ADMIN_HTML = `<!doctype html>
     if (!d.players || !d.players.length) ph += '<tr><td colspan="13" class="muted" style="padding:14px">No players yet.</td></tr>';
     document.getElementById('players').innerHTML = ph + '</tbody>';
 
-    var eh = '<thead><tr><th>Wallet</th><th class="right">IOU credit</th></tr></thead><tbody>';
+    var eh = '<thead><tr><th>Wallet</th><th class="right">Astroid Creds</th></tr></thead><tbody>';
     eh += (ec.topBalances || []).map(function (b) {
       return '<tr><td title="' + esc(b.wallet) + '">' + esc(shortW(b.wallet)) + '</td><td class="right">' + num(b.amount) + '</td></tr>';
     }).join('');

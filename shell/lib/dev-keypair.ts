@@ -126,7 +126,7 @@ function bytesToBase64(bytes: Uint8Array): string {
  * signature.
  *
  * Note: the dev keypair is a throwaway browser wallet; it must be
- * funded with SOL (and hold $ASTROID / IOU-ASTROID) on the target RPC
+ * funded with SOL (and hold $ASTROID / Astroid Creds) on the target RPC
  * for staking to actually succeed. This exists so the full flow is
  * exercisable against localnet/devnet without a browser extension.
  */

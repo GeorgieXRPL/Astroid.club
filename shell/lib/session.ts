@@ -58,7 +58,7 @@ export interface ConnectSnapshot {
   /** Current stake tier and distance to the next, priced at the live $ASTROID price. */
   tier: StakeTierProgress;
   loyaltyDays: number;
-  /** Claimable mining rewards (IOU credits) not yet moved on-chain. */
+  /** Claimable mining rewards (Astroid Creds) not yet moved on-chain. */
   pendingYield: number;
   /** Lifetime mining rewards ever earned (gross; never decreases). */
   lifetimeEarned: number;
@@ -164,7 +164,7 @@ export interface StakeTxBuild {
 
 /** A claim build additionally carries the estimated reward at build time. */
 export interface ClaimTxBuild extends StakeTxBuild {
-  /** Pending IOU-ASTROID reward at build time (UI units). */
+  /** Pending Astroid Creds reward at build time (UI units). */
   estimatedReward: number;
 }
 
@@ -197,11 +197,11 @@ export interface ExpeditionStart {
   expiresAt: string;
 }
 
-/** Result of a server-signed IOU bridge. */
+/** Result of a server-signed Astroid Creds bridge. */
 export interface BridgeIouResult {
   /** Base58 signature of the confirmed treasury transfer. */
   signature: string;
-  /** Amount of in-game credits bridged to IOU-ASTROID (UI units). */
+  /** Amount of in-game credits bridged to Astroid Creds (UI units). */
   bridged: number;
 }
 
@@ -213,7 +213,7 @@ export interface UserStakeInfo {
   walletAddress: string;
   /** Staked $ASTROID in UI units. */
   stakedAmount: number;
-  /** Pending IOU-ASTROID rewards in UI units. */
+  /** Pending Astroid Creds rewards in UI units. */
   pendingRewards: number;
   lastStakeTime: string | null;
   minerPDA: string | null;
@@ -372,12 +372,12 @@ export class Session {
     return this.send<StakeTxBuild>({ type: 'build_unstake_tx', amount }, options);
   }
 
-  /** Build an unsigned claim transaction for pending IOU-ASTROID rewards. */
+  /** Build an unsigned claim transaction for pending Astroid Creds rewards. */
   buildClaimTx(options: { timeoutMs?: number } = {}): Promise<ClaimTxBuild> {
     return this.send<ClaimTxBuild>({ type: 'build_claim_tx' }, options);
   }
 
-  /** Build an unsigned IOU-ASTROID redeem transaction for `amount` (UI units). */
+  /** Build an unsigned Astroid Creds redeem transaction for `amount` (UI units). */
   buildRedeemTx(amount: number, options: { timeoutMs?: number } = {}): Promise<StakeTxBuild> {
     return this.send<StakeTxBuild>({ type: 'build_redeem_tx', amount }, options);
   }
@@ -399,7 +399,7 @@ export class Session {
   }
 
   /**
-   * Bridge `amount` of in-game IOU credits to on-chain IOU-ASTROID. The
+   * Bridge `amount` of in-game credits to on-chain Astroid Creds. The
    * gateway debits the in-game ledger and runs a server-signed treasury
    * transfer, returning the confirmed signature. Credits are refunded
    * server-side if the transfer fails.

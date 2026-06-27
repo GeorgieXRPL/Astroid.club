@@ -1,10 +1,10 @@
 /**
  * IOU bridge + atomic redeemer for astroid.club (Phase B — the IOU
  * money-flow). Two custodial operations backed by ONE treasury hot
- * wallet that holds both pre-minted IOU-ASTROID and $ASTROID:
+ * wallet that holds both pre-minted Astroid Creds and $ASTROID:
  *
  *   1. **bridge** (in-game credits → on-chain IOU): server-signed
- *      transfer of IOU-ASTROID from the treasury to the player. The
+ *      transfer of Astroid Creds from the treasury to the player. The
  *      caller (gateway/world) debits the player's in-game credit ledger
  *      first (`StakeManager.redeemPendingYield`), so this only moves the
  *      token. Mirrors `RewardPayoutAdapter` exactly.
@@ -90,9 +90,9 @@ function memoIx(memo: string, signer: PublicKey): TransactionInstruction {
 /** Fully-resolved redeemer configuration. */
 export interface RedeemerConfig {
   rpcUrl: string;
-  /** IOU-ASTROID mint (the token the bridge hands out / swap takes back). */
+  /** Astroid Creds mint (the token the bridge hands out / swap takes back). */
   iouMint: string;
-  /** IOU-ASTROID decimals (default 9). */
+  /** Astroid Creds decimals (default 9). */
   iouDecimals: number;
   /** $ASTROID mint (the token redemption pays out). */
   astroidMint: string;
@@ -100,7 +100,7 @@ export interface RedeemerConfig {
   astroidDecimals: number;
   /** Treasury keypair holding pre-minted IOU + $ASTROID (hot wallet). */
   treasury: Keypair;
-  /** $ASTROID paid per 1 IOU-ASTROID (UI units). Default 1.0. */
+  /** $ASTROID paid per 1 Astroid Creds (UI units). Default 1.0. */
   redeemRate: number;
   /** Priority fee (micro-lamports) attached to the server-signed bridge tx. */
   priorityMicroLamports: number;
@@ -217,7 +217,7 @@ export class RedeemerService {
   }
 
   /**
-   * Bridge: transfer `iouAmount` IOU-ASTROID (UI units) from the treasury
+   * Bridge: transfer `iouAmount` Astroid Creds (UI units) from the treasury
    * to `walletAddress`. Server-signed + confirmed. The CALLER must have
    * already debited the player's in-game credits — this only moves the
    * token. Resolves with the base58 signature; throws a sanitized error
@@ -240,7 +240,7 @@ export class RedeemerService {
       const treasuryIou = await splToken.getAccount(this.connection, treasuryIouATA);
       if (treasuryIou.amount < rawIou) {
         throw new Error(
-          `Insufficient IOU treasury balance (needs ${iouAmount} IOU-ASTROID). Top up the treasury.`,
+          `Insufficient IOU treasury balance (needs ${iouAmount} Astroid Creds). Top up the treasury.`,
         );
       }
 
@@ -272,7 +272,7 @@ export class RedeemerService {
         maxRetries: 3,
       });
       this.log.info?.(
-        `[redeemer] bridged ${iouAmount} IOU-ASTROID to ${walletAddress.slice(0, 8)}… ` +
+        `[redeemer] bridged ${iouAmount} Astroid Creds to ${walletAddress.slice(0, 8)}… ` +
           `| tx ${signature.slice(0, 8)}…`,
       );
       return signature;
@@ -284,7 +284,7 @@ export class RedeemerService {
   }
 
   /**
-   * Build an ATOMIC redeem-swap for `iouAmount` IOU-ASTROID (UI units):
+   * Build an ATOMIC redeem-swap for `iouAmount` Astroid Creds (UI units):
    * one unsigned transaction that transfers the user's IOU to the treasury
    * AND the treasury's `iouAmount * redeemRate` $ASTROID to the user. The
    * treasury leg is partial-signed here; the user signs the IOU leg and
@@ -325,10 +325,10 @@ export class RedeemerService {
       try {
         userIou = await splToken.getAccount(this.connection, userIouATA);
       } catch {
-        return { error: 'You have no IOU-ASTROID to redeem. Bridge in-game credits first.' };
+        return { error: 'You have no Astroid Creds to redeem. Bridge in-game credits first.' };
       }
       if (userIou.amount < rawIou) {
-        return { error: `Insufficient IOU-ASTROID balance (need ${iouAmount}).` };
+        return { error: `Insufficient Astroid Creds balance (need ${iouAmount}).` };
       }
 
       // The treasury must be able to cover the $ASTROID payout.
@@ -388,7 +388,7 @@ export class RedeemerService {
       const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
       return {
         transaction: serialized.toString('base64'),
-        message: `Redeem ${iouAmount} IOU-ASTROID for ${astroidOut} $ASTROID`,
+        message: `Redeem ${iouAmount} Astroid Creds for ${astroidOut} $ASTROID`,
         lastValidBlockHeight,
         blockhash,
         requiresCoSign: true,

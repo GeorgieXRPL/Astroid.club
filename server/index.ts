@@ -334,9 +334,9 @@ async function main(): Promise<void> {
       chainImpls.coSignAndSubmitRedeem = (wallet, args) =>
         redeemer.coSignAndSubmitRedeem(wallet, args);
       console.info(
-        `[astroid-club] IOU bridge + atomic redeemer wired (treasury=` +
+        `[astroid-club] Astroid Creds bridge + atomic redeemer wired (treasury=` +
           `${redeemer.treasuryAddress.slice(0, 8)}…, rate=${redeemerConfig.redeemRate} ` +
-          `$ASTROID/IOU). Bridge converts in-game credits to on-chain IOU; redeem swaps IOU↔$ASTROID.`,
+          `$ASTROID/cred). Bridge converts in-game credits to on-chain Astroid Creds; redeem swaps Creds↔$ASTROID.`,
       );
     } else {
       console.warn(

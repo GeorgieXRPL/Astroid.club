@@ -992,8 +992,8 @@ function OnChainStakingPanel({
       <p className="mb-4 text-sm leading-relaxed text-white/55">
         Lock $ASTROID to raise your drill tier and defense. Tiers are priced in USD and scale with
         the live price (Bronze / Silver / Gold / Diamond &asymp; $50 / $100 / $200 / $400).{' '}
-        <span className="text-white/40">&ldquo;Redeem IOU&rdquo;</span> turns IOU-ASTROID in your
-        wallet into $ASTROID (1:1) and finishes any unfinished claim.
+        <span className="text-white/40">&ldquo;Redeem Creds&rdquo;</span> turns Astroid Creds in
+        your wallet into $ASTROID (1:1) and finishes any unfinished claim.
       </p>
 
       {chainOff && (
@@ -1013,7 +1013,7 @@ function OnChainStakingPanel({
 
       <div className="mb-5 grid gap-4 sm:grid-cols-3">
         <Stat label="Staked $ASTROID" mono accent value={fmt(info?.stakedAmount ?? 0)} />
-        <Stat label="Staking rewards (IOU)" mono value={fmt(info?.pendingRewards ?? 0)} />
+        <Stat label="Staking rewards (Creds)" mono value={fmt(info?.pendingRewards ?? 0)} />
         <Stat
           label="Last stake"
           value={info?.lastStakeTime ? short(new Date(info.lastStakeTime).toLocaleString()) : '-'}
@@ -1062,10 +1062,10 @@ function OnChainStakingPanel({
             className="btn-ghost"
             disabled={!available || busy !== null || amount <= 0}
             onClick={() => run('redeem')}
-            title="Convert IOU-ASTROID tokens in your wallet to $ASTROID (1:1)"
+            title="Convert Astroid Creds in your wallet to $ASTROID (1:1)"
             type="button"
           >
-            {busy === 'redeem' ? 'Redeeming…' : 'Redeem IOU → $ASTROID'}
+            {busy === 'redeem' ? 'Redeeming…' : 'Redeem Creds → $ASTROID'}
           </button>
         </div>
       </div>

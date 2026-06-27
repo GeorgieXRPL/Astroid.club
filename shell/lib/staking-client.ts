@@ -93,7 +93,7 @@ export async function runStakeAction(
   // (`signTransaction`) and the gateway co-signs + submits via
   // `submitRedeemSwap`. This wallet-first ordering keeps Phantom from flagging
   // the redeem as a drainer (it never sees a pre-attached foreign signature).
-  // Every other action (stake/unstake/claim, and the legacy IOU-only redeem
+  // Every other action (stake/unstake/claim, and the legacy Creds-only redeem
   // fallback) is single-signer and the wallet submits it directly.
   let signature: string;
   if (kind === 'redeem' && build.requiresCoSign) {
@@ -156,14 +156,14 @@ export interface ClaimResult {
   ok: boolean;
   /** Amount of in-game credits claimed (UI units). */
   amount: number;
-  /** Signature of the server-signed bridge (credits → IOU-ASTROID). */
+  /** Signature of the server-signed bridge (credits → Astroid Creds). */
   bridgeSignature?: string;
-  /** Signature of the user-signed redeem swap (IOU-ASTROID → $ASTROID). */
+  /** Signature of the user-signed redeem swap (Astroid Creds → $ASTROID). */
   redeemSignature?: string;
   /**
    * True when the bridge succeeded but the redeem swap did not. The credits
-   * became IOU-ASTROID tokens in the wallet (nothing lost) and can be
-   * finished later with "Redeem IOU".
+   * became Astroid Creds tokens in the wallet (nothing lost) and can be
+   * finished later with "Redeem Creds".
    */
   bridgedOnly?: boolean;
   /** Human-readable summary safe for the UI / event log. */
@@ -173,14 +173,14 @@ export interface ClaimResult {
 /**
  * Claim accrued in-game mining rewards out to the wallet as real $ASTROID.
  *
- * Two on-chain steps: (1) the gateway BRIDGES the in-game IOU credits to
- * on-chain IOU-ASTROID with a server-signed treasury transfer (this debits
+ * Two on-chain steps: (1) the gateway BRIDGES the in-game credits to
+ * on-chain Astroid Creds with a server-signed treasury transfer (this debits
  * the in-game ledger; it's refunded server-side if it fails), then (2) the
- * user signs an ATOMIC redeem swap exchanging that IOU-ASTROID for $ASTROID.
+ * user signs an ATOMIC redeem swap exchanging that Astroid Creds for $ASTROID.
  *
  * If step 1 fails, credits are untouched (server refund) and this rejects via
  * {@link SessionError}. If step 1 succeeds but step 2 fails (user rejects /
- * transport), the credits have become IOU-ASTROID tokens in the wallet — no
+ * transport), the credits have become Astroid Creds tokens in the wallet — no
  * loss — and the result is `{ ok: false, bridgedOnly: true }`.
  */
 export async function runClaimToWallet(
@@ -197,11 +197,12 @@ export async function runClaimToWallet(
     return { ok: false, amount, message: 'No claimable rewards.' };
   }
 
-  // Step 1: bridge in-game credits → on-chain IOU-ASTROID (server-signed).
+  // Step 1: bridge in-game credits → on-chain Astroid Creds (server-signed).
+  // (formerly handed out as the unnamed IOU token; now the named Astroid Creds.)
   // A failure here throws SessionError; credits are refunded by the gateway.
   const bridge = await session.bridgeIou(amount);
 
-  // Step 2: atomic swap IOU-ASTROID → $ASTROID (user signs + submits).
+  // Step 2: atomic swap Astroid Creds → $ASTROID (user signs + submits).
   try {
     const redeem = await runStakeAction(session, source, 'redeem', amount);
     return {
@@ -212,7 +213,7 @@ export async function runClaimToWallet(
       bridgedOnly: !redeem.ok,
       message: redeem.ok
         ? `Claimed ${formatAmount(amount)} → $ASTROID (tx ${shortSig(redeem.signature)})`
-        : `Bridged to IOU-ASTROID, but the redeem step didn't finish (${redeem.message}). Use "Redeem IOU" to convert to $ASTROID.`,
+        : `Bridged to Astroid Creds, but the redeem step didn't finish (${redeem.message}). Use "Redeem Creds" to convert to $ASTROID.`,
     };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -221,7 +222,7 @@ export async function runClaimToWallet(
       amount,
       bridgeSignature: bridge.signature,
       bridgedOnly: true,
-      message: `Bridged ${formatAmount(amount)} to IOU-ASTROID, but the redeem step failed (${reason}). Your rewards are now IOU-ASTROID tokens in your wallet. Use "Redeem IOU" to convert to $ASTROID.`,
+      message: `Bridged ${formatAmount(amount)} to Astroid Creds, but the redeem step failed (${reason}). Your rewards are now Astroid Creds tokens in your wallet. Use "Redeem Creds" to convert to $ASTROID.`,
     };
   }
 }
@@ -303,10 +304,10 @@ function shortSig(sig?: string): string {
 /** Read the wallet's on-chain stake position; returns null on transport error. */
 /**
  * Finish a claim that stopped at the bridge step (`bridgedOnly`). Runs ONLY
- * the user-signed redeem swap (IOU-ASTROID → $ASTROID) for `amount`. Used by
+ * the user-signed redeem swap (Astroid Creds → $ASTROID) for `amount`. Used by
  * the "Finish claim" recovery button when the player was too slow to sign the
  * redeem in time (blockhash expiry / rejected prompt) and their rewards are
- * sitting as IOU-ASTROID tokens in the wallet.
+ * sitting as Astroid Creds tokens in the wallet.
  */
 export async function runRedeemIou(
   session: Session,
@@ -328,7 +329,7 @@ export async function runRedeemIou(
     redeemSignature: redeem.signature,
     bridgedOnly: !redeem.ok,
     message: redeem.ok
-      ? `Redeemed ${formatAmount(amount)} IOU-ASTROID → $ASTROID (tx ${shortSig(redeem.signature)})`
+      ? `Redeemed ${formatAmount(amount)} Astroid Creds → $ASTROID (tx ${shortSig(redeem.signature)})`
       : `Redeem didn't finish (${redeem.message}). Try "Finish claim" again.`,
   };
 }
@@ -360,9 +361,9 @@ function submitMessage(kind: StakeActionKind, amount: number): string {
     case 'unstake':
       return `Unstaked ${formatAmount(amount)} $ASTROID`;
     case 'claim':
-      return 'Claimed pending IOU-ASTROID rewards';
+      return 'Claimed pending Astroid Creds rewards';
     case 'redeem':
-      return `Redeemed ${formatAmount(amount)} IOU-ASTROID`;
+      return `Redeemed ${formatAmount(amount)} Astroid Creds`;
     case 'stake':
       return `Staked ${formatAmount(amount)} $ASTROID`;
   }

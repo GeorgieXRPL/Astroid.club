@@ -269,7 +269,7 @@ const TERMS: Term[] = [
   {
     term: 'Claim',
     meaning:
-      'Move your credits on-chain: the gateway bridges them to IOU-ASTROID, then your wallet signs one atomic swap to receive real $ASTROID. Credits only leave once it confirms, so nothing is lost mid-claim.',
+      'Move your credits on-chain: the gateway bridges them to Astroid Creds, then your wallet signs one atomic swap to receive real $ASTROID. Credits only leave once it confirms, so nothing is lost mid-claim.',
   },
   {
     term: 'Treasury (raid vault)',

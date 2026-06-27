@@ -194,7 +194,7 @@ function ConnectedArena({
   const [deflecting, setDeflecting] = useState(false);
   // Bumped to snap every draggable HUD panel back to its default position.
   const [hudResetKey, setHudResetKey] = useState(0);
-  // Amount left as IOU-ASTROID in the wallet when a claim's redeem step
+  // Amount left as Astroid Creds in the wallet when a claim's redeem step
   // didn't finish (e.g. the player was too slow to sign). Drives the
   // "Finish claim" recovery button so those rewards aren't stranded.
   const [pendingRedeem, setPendingRedeem] = useState(0);
@@ -449,7 +449,7 @@ function ConnectedArena({
   );
 
   // Claim accrued mining rewards out to the wallet as real $ASTROID. This
-  // BRIDGES the in-game IOU credits on-chain (server-signed) then has the
+  // BRIDGES the in-game credits on-chain (server-signed) then has the
   // user sign an atomic redeem swap → $ASTROID. Credits leave the in-game
   // accumulator only once the bridge confirms (refunded on failure), so the
   // old "click claim and the rewards vanish" behaviour is gone.
@@ -476,7 +476,7 @@ function ConnectedArena({
           code: result.bridgedOnly ? 'redeem_incomplete' : 'claim_failed',
           message: result.message,
         });
-        // The bridge moved the credits to IOU-ASTROID in the wallet but the
+        // The bridge moved the credits to Astroid Creds in the wallet but the
         // redeem swap didn't finish. Offer a one-click recovery instead of
         // stranding the rewards (the in-game claimable already shows 0).
         if (result.bridgedOnly) setPendingRedeem(amount);
@@ -496,7 +496,7 @@ function ConnectedArena({
   }, [session, wallet.source, snap, refresh]);
 
   // Recovery for a claim that stopped at the bridge step: finish the redeem
-  // swap for the IOU-ASTROID now sitting in the wallet.
+  // swap for the Astroid Creds now sitting in the wallet.
   const onFinishRedeem = useCallback(async () => {
     if (!canStake(wallet.source) || !wallet.source || pendingRedeem <= 0) return;
     setBusy('claim');
@@ -1127,7 +1127,7 @@ function IdentityPanel({
           className="mt-2 w-full rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-amber-300 transition hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={claiming}
           onClick={onFinishRedeem}
-          title="Your rewards were bridged to IOU-ASTROID but the redeem step didn't finish. Finish it now. Nothing was lost."
+          title="Your rewards were bridged to Astroid Creds but the redeem step didn't finish. Finish it now. Nothing was lost."
           type="button"
         >
           {claiming ? 'Finishing…' : `Finish claim ${fmt(pendingRedeem)} → $ASTROID`}

@@ -1,0 +1,11 @@
+{
+  "name": "Astroid Creds",
+  "symbol": "ASTROCRED",
+  "description": "In-game credits for astroid.club, the $ASTROID mining game. Earned through play and redeemable for $ASTROID from the treasury.",
+  "image": "https://astroid.club/astrocred.jpg",
+  "external_url": "https://astroid.club",
+  "properties": {
+    "files": [{ "uri": "https://astroid.club/astrocred.jpg", "type": "image/jpeg" }],
+    "category": "image"
+  }
+}
