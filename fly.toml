@@ -34,19 +34,22 @@ kill_timeout = "10s"
   HOLDER_PREWARM_MAX_LOOKBACK = "100"
 
   # -- emission governor (reserve protection) --------------------------------
-  # Bounds token issuance so mining can't outrun the treasury. Two guards:
-  #   1. EMISSION_DAILY_CAP — hard ceiling on credits issued per rolling 24h.
-  #      The active runaway guard during the test phase.
-  #   2. EMISSION_BUDGET — max OUTSTANDING liability (current sum of unredeemed
-  #      pending credits across ALL wallets) before issuance tapers to 0.
-  #      Recirculation-aware: claiming/redeeming/spending credits frees headroom
-  #      back up. This starter value keeps the taper armed without choking
-  #      testing while wallets hold multi-million pending balances.
-  # TODO(before public launch): size EMISSION_BUDGET to your real funded IOU
-  # backing and lower EMISSION_DAILY_CAP to the intended steady-state rate.
-  EMISSION_BUDGET = "500000000"
-  EMISSION_DAILY_CAP = "1000000"
+  # Bounds token issuance so mining can't outrun the treasury. Guards:
+  #   1. DYNAMIC backing budget — pegged to the LIVE redeemer-treasury $ASTROID
+  #      balance x EMISSION_BACKING_FRACTION (polled on an interval). Issuance
+  #      tapers to 0 as outstanding liability approaches payable reserves, and
+  #      scales automatically as the treasury grows. This is the primary guard.
+  #   2. EMISSION_DAILY_CAP — hard ceiling on credits issued per rolling 24h,
+  #      smoothing bursts regardless of headroom.
+  #   3. EMISSION_BUDGET — STATIC floor used only before the first treasury poll
+  #      / when chain is off. Keep 0 so a poll failure can't open the floodgates
+  #      (the daily cap still applies).
+  EMISSION_BUDGET = "0"
+  EMISSION_BACKING_FRACTION = "0.8"
+  EMISSION_DAILY_CAP = "250000"
   EMISSION_TAPER_FRACTION = "0.25"
+  # Base reward per discovery, before resource/asteroid multipliers + variance.
+  YIELD_BASE_PER_DISCOVERY = "50"
 
   # -- anti-spoof drill-power bound -------------------------------------------
   # Drill power is self-reported (no proof-of-work). Clamp the reported base to
