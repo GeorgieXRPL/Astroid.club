@@ -1521,6 +1521,22 @@ function AsteroidActionPanel({
               </button>
             )}
           </div>
+
+          {/* Raiding is gated on having a home base (and not aiming at your own
+              home). Rather than silently hiding the Raid button, say why so the
+              path to a raid is obvious. */}
+          {!snapshot?.homeStationAsteroidId ? (
+            <p className="rounded-md border border-ember/30 bg-ember/5 px-3 py-2 font-mono text-[10px] leading-relaxed text-ember/90">
+              Raids are locked until you set a home base. Tap{' '}
+              <span className="text-white/85">Set as home</span> on the asteroid you want to operate
+              from, then select a rival rock — the red <span className="text-white/85">Raid</span>{' '}
+              button and wager field appear right here.
+            </p>
+          ) : isHome ? (
+            <p className="font-mono text-[10px] leading-relaxed text-white/45">
+              This is your home base. Select a different asteroid to launch a raid against it.
+            </p>
+          ) : null}
         </div>
 
         {canRaid && (
