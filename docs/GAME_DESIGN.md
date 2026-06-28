@@ -176,14 +176,13 @@ The 1.2× defender advantage is preserved verbatim from BG. A tied or under-1.2�
 **Defenders win:**
 
 - The asteroid receives a **defense buff** — temporary **raid immunity**.
-- 90% of the loser bet pool is **burned** (no on-chain side effect when chain is off; logged as a virtual burn).
-- 10% of the loser bet pool is distributed to defenders, weighted by their stake at the asteroid.
+- The loser bet pool is split (see §5 for the exact ratio). For **on-chain raid wagers** the default is **40% burned / 40% recirculated to other asteroids' vaults / 20% to defenders** (stake-weighted). The legacy in-memory stake-bet path (`raid-engine.ts`, chain off) still uses the older 90% burn / 10% defenders split.
 
 Both outcomes apply cooldowns to the raid initiator (`expedition_recovery`, `expedition_start`).
 
 ### 4.5 Defense buffs and immunity
 
-After a successful defense, the asteroid is granted **raid immunity** for a fixed window. Expedition creation against an immune asteroid is rejected. The buff expires automatically and can be cleared by admin tooling.
+After a successful defense, the asteroid is granted **raid immunity** for a fixed window — **30 minutes** by default (env-tunable via `RAID_IMMUNITY_MIN`). Expedition creation against an immune asteroid is rejected. A separate **+10% drill-power boost** runs for a fixed 1 hour and can outlast the immunity window, so a fresh defender keeps a combat edge even once the asteroid is raidable again. The buff expires automatically and can be cleared by admin tooling.
 
 ---
 
@@ -193,7 +192,7 @@ Bets are an optional spice on top of raids. A player can attach a bet (≤ 20% o
 
 - **Locked** the moment the bet is placed (the player can't unstake the locked amount until the raid resolves).
 - **Returned** in full if the attacker side wins.
-- **90% burned, 10% to defenders** if the defender side wins (preserves BG's exact split).
+- **Split three ways if the defender side wins** (on-chain raid wagers, `bet-escrow.ts`): default **40% burned / 40% recirculated / 20% to defenders**, env-tunable via `RAID_LOSS_BURN_BPS` / `RAID_LOSS_RECIRCULATE_BPS` / `RAID_LOSS_DEFENDER_BPS` (must sum to 10000). The **recirculated** share is paid into *other* asteroids' raid vaults as fresh stealable bounty — keeping forfeited value in play rather than destroying it — and moved on-chain to the treasury that backs those vaults. If no defender is eligible for spoils, that share also recirculates. (Moved off BG's flat 90/10 burn because whale-sized wagers made a 90% burn needlessly destructive.) The legacy in-memory stake-bet path retains the 90/10 split.
 
 Duplicate bets on the same raid are rejected. A player cannot have multiple bets locked across different active raids without explicit support (current logic allows but tests cover the single-bet case).
 

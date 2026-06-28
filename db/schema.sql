@@ -75,6 +75,16 @@ CREATE TABLE IF NOT EXISTS escrow_wagers (
 
 CREATE INDEX IF NOT EXISTS escrow_wagers_status_idx ON escrow_wagers (status);
 
+-- Operator-managed comp/bypass list: wallets that skip the holder gate (team,
+-- partners, comped testers) while the game stays open to everyone else. Edited
+-- live from the admin console; loaded into an in-memory set on boot. One row
+-- per wallet (last write wins on the optional note).
+CREATE TABLE IF NOT EXISTS comp_wallets (
+  wallet      TEXT PRIMARY KEY,
+  note        TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Current pending-yield balance per wallet, derived from the event log.
 -- Read on boot to repopulate in-memory state. `security_invoker = on` makes the
 -- view run with the QUERYING user's privileges (not the creator's), so it
@@ -102,6 +112,7 @@ ALTER TABLE home_stations  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE yield_events   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE raid_vaults    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE escrow_wagers  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comp_wallets   ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON home_stations, yield_events, raid_vaults, escrow_wagers
+REVOKE ALL ON home_stations, yield_events, raid_vaults, escrow_wagers, comp_wallets
   FROM anon, authenticated;

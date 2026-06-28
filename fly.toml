@@ -70,6 +70,23 @@ kill_timeout = "10s"
   RAID_DRILL_SOFTCAP = "5000000"
   RAID_DRILL_SOFTCAP_SLOPE = "0.15"
 
+  # -- forfeited-wager loss split (basis points; must sum to 10000) -----------
+  # When a raider LOSES a wagered raid, the forfeit is split: burned (deflation)
+  # / recirculated into OTHER asteroids' raid vaults as fresh stealable bounty
+  # (value stays in play) / stake-weighted defender spoils. Moved off the old
+  # flat 90/10 burn because whale-sized wagers made a 90% burn needlessly
+  # destructive. Undelivered defender share (no eligible defenders) recirculates.
+  RAID_LOSS_BURN_BPS = "4000"
+  RAID_LOSS_RECIRCULATE_BPS = "4000"
+  RAID_LOSS_DEFENDER_BPS = "2000"
+
+  # -- post-defense raid immunity (minutes) -----------------------------------
+  # How long an asteroid is un-raidable after a successful defense. Softened
+  # from the original 2h to 30m so asteroids re-enter the raid pool sooner and
+  # the loop stays active. The defender's +10% drill boost runs a fixed 1h and
+  # can outlast this window.
+  RAID_IMMUNITY_MIN = "30"
+
 [[services]]
   protocol = "tcp"
   internal_port = 3002

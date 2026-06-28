@@ -1,23 +1,49 @@
 /**
  * Admin HTTP surface, mounted on the gateway's existing HTTP server.
  *
- *   GET /admin            → the dashboard shell (no secret in the page)
- *   GET /admin/api/snapshot → live JSON state (Bearer-token protected)
+ *   GET    /admin                  → the dashboard shell (no secret in the page)
+ *   GET    /admin/api/snapshot      → live JSON state (Bearer-token protected)
+ *   GET    /admin/api/comp-wallets  → list comped (holder-gate-bypass) wallets
+ *   POST   /admin/api/comp-wallets  → add a comped wallet ({ wallet, note? })
+ *   DELETE /admin/api/comp-wallets  → remove a comped wallet ({ wallet })
  *
  * Auth: a single shared secret (`ADMIN_SECRET`, via `runtime.adminSecret`)
  * compared in constant time. The dashboard sends it as
  * `Authorization: Bearer <secret>`. When `ADMIN_SECRET` is unset the whole
  * surface returns 503 (disabled) — the console only exists when the
- * operator opts in. Read-only: no endpoint mutates game state.
+ * operator opts in. The snapshot is read-only; the only mutations exposed are
+ * comp-wallet add/remove (operator access control, not game state).
  */
 
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { runtime } from '../config/runtime.js';
+import { isValidWalletAddress } from '../verification/comp-wallets.js';
 
 import { ADMIN_HTML } from './admin-page.js';
 import { type AdminSnapshotDeps, buildAdminSnapshot } from './admin-snapshot.js';
+
+/** Max accepted admin request body. Comp-wallet payloads are tiny. */
+const MAX_BODY_BYTES = 4 * 1024;
+
+/** Read and JSON-parse a small request body. Rejects oversized/invalid input. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    total += buf.length;
+    if (total > MAX_BODY_BYTES) throw new Error('request body too large');
+    chunks.push(buf);
+  }
+  if (total === 0) return {};
+  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('body must be a JSON object');
+  }
+  return parsed as Record<string, unknown>;
+}
 
 /** Constant-time token check. False on any length/secret mismatch. */
 function tokenValid(provided: string | undefined, secret: string | undefined): boolean {
@@ -171,6 +197,54 @@ export function createAdminHandler(
         } catch (err) {
           json(res, 500, { error: 'snapshot_failed', message: err instanceof Error ? err.message : String(err) });
         }
+        return true;
+      }
+
+      // Comp / holder-gate-bypass list management. GET lists; POST adds; DELETE
+      // removes. Mutations persist + update the live in-memory set (no redeploy).
+      if (url.pathname === '/admin/api/comp-wallets') {
+        const svc = deps.compWallets;
+        if (!svc) {
+          json(res, 503, {
+            error: 'comp_wallets_disabled',
+            message: 'Comp-wallet management is not wired in this deployment.',
+          });
+          return true;
+        }
+        const method = (req.method ?? 'GET').toUpperCase();
+        if (method === 'GET') {
+          json(res, 200, { wallets: svc.list() });
+          return true;
+        }
+        if (method === 'POST' || method === 'DELETE') {
+          void (async () => {
+            try {
+              const body = await readJsonBody(req);
+              const wallet = body.wallet;
+              if (!isValidWalletAddress(wallet)) {
+                json(res, 400, { error: 'invalid_wallet', message: 'Provide a valid base58 wallet address.' });
+                return;
+              }
+              if (method === 'POST') {
+                const note = typeof body.note === 'string' ? body.note.slice(0, 200) : undefined;
+                await svc.add(wallet, note);
+                console.info(`[admin] comp wallet added: ${wallet.slice(0, 8)}…`);
+                json(res, 200, { ok: true, wallet, wallets: svc.list() });
+              } else {
+                const removed = await svc.remove(wallet);
+                console.info(`[admin] comp wallet removed: ${wallet.slice(0, 8)}… (present=${removed})`);
+                json(res, 200, { ok: true, wallet, removed, wallets: svc.list() });
+              }
+            } catch (err) {
+              json(res, 500, {
+                error: 'comp_wallet_failed',
+                message: err instanceof Error ? err.message : String(err),
+              });
+            }
+          })();
+          return true;
+        }
+        json(res, 405, { error: 'method_not_allowed' });
         return true;
       }
 

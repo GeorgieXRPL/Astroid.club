@@ -40,6 +40,7 @@ import { ChainOps, type ChainOpsImplementations } from './chain/index.js';
 import { OnChainHoldEstimator } from './chain/prewarm.js';
 import { PriceOracle, WRAPPED_SOL_MINT } from './chain/price-oracle.js';
 import { BetEscrowChainService, getBetEscrowConfigFromEnv } from './chain/bet-escrow-chain.js';
+import { getRaidLossSplit } from './game/bet-escrow.js';
 import { EscrowManager } from './chain/escrow-manager.js';
 import { RedeemerService, getRedeemerConfigFromEnv, loadTreasuryKeypair } from './chain/redeemer.js';
 import { TreasuryBackingPoller } from './chain/treasury-backing.js';
@@ -47,6 +48,7 @@ import { RewardPayoutAdapter, getRewardConfigFromEnv } from './chain/rewards.js'
 import { QuarryStakingAdapter, getQuarryConfigFromEnv } from './chain/staking.js';
 import { runtime } from './config/runtime.js';
 import type {
+  CompWalletStore,
   EscrowStore,
   EscrowWagerRecord,
   HomeStationStore,
@@ -59,6 +61,7 @@ import { GameWorld } from './game/world.js';
 import { AstroidGateway } from './net/gateway.js';
 import { PostgresGameStore } from './storage/postgres-store.js';
 import { RedisGameStore } from './storage/redis-store.js';
+import { CompWalletService } from './verification/comp-wallets.js';
 import { HolderTracker } from './verification/holder-tracker.js';
 
 function logRuntime(): void {
@@ -347,9 +350,10 @@ async function main(): Promise<void> {
 
     // Raid-wager escrow (`chain_bet_escrow`). Reuses the redeemer treasury
     // hot wallet to custody escrowed wagers: players deposit (wallet-signed)
-    // into the escrow ATA, and the treasury server-signs settlement
-    // (return on win, burn 90% + defender spoils on loss). Without the
-    // treasury key this stays unwired and the escrow ops report `disabled`.
+    // into the escrow ATA, and the treasury server-signs settlement (return on
+    // win; on loss split the forfeit into burn / recirculate-to-vaults /
+    // defender spoils). Without the treasury key this stays unwired and the
+    // escrow ops report `disabled`.
     const betEscrowConfig = getBetEscrowConfigFromEnv();
     if (betEscrowConfig) {
       const betEscrowChain = new BetEscrowChainService(betEscrowConfig, {
@@ -377,9 +381,11 @@ async function main(): Promise<void> {
       chainImpls.burnBetEscrow = (amount, raidId) => betEscrowChain.burnWager(amount, raidId);
       betEscrowWired = true;
       const feeSummary = betEscrowChain.getFeeSummary();
+      const split = getRaidLossSplit();
       console.info(
         `[astroid-club] raid-wager escrow wired (escrow=${betEscrowChain.escrowAddress.slice(0, 8)}…). ` +
-          'Wagers escrow on deposit; win returns, loss burns 90% + 10% defender spoils. ' +
+          `Wagers escrow on deposit; win returns, loss splits ${split.burnBps / 100}% burn / ` +
+          `${split.recirculateBps / 100}% recirculate → other vaults / ${split.defenderBps / 100}% defender spoils. ` +
           `Creation fee ${feeSummary.feeBps / 100}% + ${feeSummary.feeFlat} $ASTROID flat → treasury; ` +
           `rent-offset burn ${betEscrowConfig.rentBurnEnabled ? 'ENABLED' : 'disabled'}.`,
       );
@@ -514,6 +520,7 @@ async function main(): Promise<void> {
   let yieldLedger: YieldLedger | undefined;
   let raidVaultStore: RaidVaultStore | undefined;
   let escrowStore: EscrowStore | undefined;
+  let compWalletStore: CompWalletStore | undefined;
   if (runtime.databaseUrl) {
     postgresStore = new PostgresGameStore({
       connectionString: runtime.databaseUrl,
@@ -523,6 +530,7 @@ async function main(): Promise<void> {
     yieldLedger = postgresStore.ledger;
     raidVaultStore = postgresStore.raidVault;
     escrowStore = postgresStore.escrow;
+    compWalletStore = postgresStore.compWallets;
     console.info(
       '[astroid-club] Postgres persistence ENABLED — auditable yield ledger + home ' +
         'stations are the durable system of record.',
@@ -533,6 +541,7 @@ async function main(): Promise<void> {
     pendingYieldStore = redisStore.pendingYield;
     raidVaultStore = redisStore.raidVault;
     escrowStore = redisStore.escrow;
+    compWalletStore = redisStore.compWallets;
     console.info(
       '[astroid-club] Redis persistence ENABLED — home stations and pending IOU ' +
         'credits survive restarts (balance cache; no audit log — see docs/SUPABASE.md).',
@@ -566,6 +575,20 @@ async function main(): Promise<void> {
           'only (no restart reconciliation). Configure DATABASE_URL or REDIS_URL.',
       );
     }
+  }
+
+  // Comp / holder-gate-bypass list: wallets that skip the holder gate while the
+  // game stays open to everyone else. Durable (when a store is configured) and
+  // live-editable from the admin console; seeded from COMP_WALLETS on boot.
+  const compWallets = new CompWalletService({ store: compWalletStore, logger: console });
+  await compWallets.load(runtime.compWalletSeed);
+  if (!compWalletStore && runtime.compWalletSeed.length === 0) {
+    // No store + no seed is fine (empty list); but a no-store deployment that
+    // adds wallets via the console will lose them on restart — warn once.
+    console.info(
+      '[astroid-club] comp-wallet list is in-memory only (no DATABASE_URL/REDIS_URL); ' +
+        'admin-added wallets reset on restart.',
+    );
   }
 
   const world = new GameWorld({
@@ -681,6 +704,7 @@ async function main(): Promise<void> {
     getPriceOracle: () => priceOracle,
     escrowManager,
     getEscrowFees: () => betEscrowChainSvc?.getFeeSummary() ?? null,
+    compWallets,
   });
   console.info(
     runtime.adminSecret
@@ -693,6 +717,7 @@ async function main(): Promise<void> {
     chainOps,
     server: httpServer,
     walletAllowlist: runtime.walletAllowlist,
+    compWallets,
     // Route the "deposit landed but raid couldn't launch" refund through the
     // durable outbox so a chain failure is recorded + retried, not lost.
     ...(escrowManager && {

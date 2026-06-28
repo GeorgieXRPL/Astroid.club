@@ -758,8 +758,12 @@ export class GameWorld {
    * Resolves the in-memory `BetEscrow` pool, then dispatches the real token
    * movement via the injected chain hooks:
    *   - attackers won  → return the full wager to the raider.
-   *   - defenders won  → burn 90% + pay the 10% spoils to defenders
-   *                      (stake-weighted); any rounding dust is also burned so
+   *   - defenders won  → split the forfeited wager three ways (default
+   *                      40% burn / 40% recirculate / 20% defender spoils):
+   *                      the recirculated share is credited to OTHER asteroids'
+   *                      raid vaults in-game (fresh stealable bounty) and moved
+   *                      to the backing treasury on-chain; spoils go to the
+   *                      stake-weighted defenders; the remainder is burned so
    *                      escrow nets to zero.
    * No-op for raids without an escrowed wager. The chain hooks are fire-and-
    * forget; when unset (chain off) only the in-memory ledger updates.
@@ -794,22 +798,53 @@ export class GameWorld {
       return;
     }
 
-    // Defenders won: pay the stake-weighted 10% spoils, burn the rest (the 90%
-    // sink + any rounding dust) so escrow nets exactly to zero.
+    // Defenders won: the forfeited wager is split three ways by the ledger
+    // (defender spoils / recirculate / burn) so the parts sum EXACTLY to the
+    // wager and escrow nets to zero. Credit the recirculated share to other
+    // asteroids' vaults in-game; the chain leg moves the real tokens to the
+    // treasury that backs them.
     const defenderPayouts: Array<{ wallet: string; amount: number }> = [];
-    let paidToDefenders = 0;
     for (const [defenderWallet, amount] of resolution.defenderPayouts) {
-      if (amount > 0) {
-        defenderPayouts.push({ wallet: defenderWallet, amount });
-        paidToDefenders += amount;
-      }
+      if (amount > 0) defenderPayouts.push({ wallet: defenderWallet, amount });
     }
-    const toBurn = wager.amount - paidToDefenders;
+    const recirculate = resolution.totalRecirculated;
+    const burn = resolution.totalBurned;
+    if (recirculate > 0) this.recirculateToVaults(targetAsteroidId, recirculate);
     this.onWagerSettle?.({
       wagerId: wager.wagerId,
-      ...(toBurn > 0 && { burn: toBurn }),
+      ...(burn > 0 && { burn }),
+      ...(recirculate > 0 && { recirculate }),
       ...(defenderPayouts.length > 0 && { defenderPayouts }),
     });
+  }
+
+  /**
+   * Credit a forfeited wager's recirculated share to the raid vaults of
+   * asteroids OTHER than the one just defended — turning a lost raid into
+   * fresh stealable bounty spread across the map. Distributed evenly, with the
+   * rounding remainder assigned to the last recipient so the in-game credits
+   * sum EXACTLY to `amount` (matching the on-chain transfer to the backing
+   * treasury). Falls back to the target itself if it's the only asteroid.
+   */
+  private recirculateToVaults(defendedAsteroidId: string, amount: number): void {
+    if (amount <= 0) return;
+    const others = this.registry
+      .getAllAsteroids()
+      .map((a) => a.definition.id)
+      .filter((id) => id !== defendedAsteroidId);
+    if (others.length === 0) {
+      this.raidVault.add(defendedAsteroidId, amount);
+      return;
+    }
+    const per = Math.floor(amount / others.length);
+    let allocated = 0;
+    for (let i = 0; i < others.length; i++) {
+      const share = i === others.length - 1 ? amount - allocated : per;
+      if (share > 0) {
+        this.raidVault.add(others[i]!, share);
+        allocated += share;
+      }
+    }
   }
 
   /**

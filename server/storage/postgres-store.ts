@@ -23,6 +23,7 @@
 import { Pool, type PoolConfig } from 'pg';
 
 import type {
+  CompWalletStore,
   EscrowStore,
   EscrowWagerRecord,
   GameLogger,
@@ -65,6 +66,8 @@ export class PostgresGameStore {
   readonly raidVault: RaidVaultStore;
   /** Adapter to wire as the `EscrowManager`'s durable `store`. */
   readonly escrow: EscrowStore;
+  /** Adapter to wire as the `CompWalletService`'s durable `store`. */
+  readonly compWallets: CompWalletStore;
 
   private readonly client: PgClientLike;
   private readonly log: GameLogger;
@@ -109,6 +112,11 @@ export class PostgresGameStore {
       put: (record) => this.putEscrow(record),
       delete: (wagerId) => this.deleteEscrow(wagerId),
       getUnsettled: () => this.getUnsettledEscrow(),
+    };
+    this.compWallets = {
+      list: () => this.listCompWallets(),
+      add: (wallet, note) => this.addCompWallet(wallet, note),
+      remove: (wallet) => this.removeCompWallet(wallet),
     };
   }
 
@@ -293,6 +301,34 @@ export class PostgresGameStore {
         lastError: (row.last_error as string | null) ?? undefined,
       };
     });
+  }
+
+  // --------- Comp / holder-gate-bypass wallets ---------
+
+  private async listCompWallets(): Promise<string[]> {
+    try {
+      const { rows } = await this.client.query(
+        'SELECT wallet FROM comp_wallets ORDER BY wallet',
+      );
+      return rows.map((row) => row.wallet as string);
+    } catch (err) {
+      this.log.error('[PostgresGameStore] failed to read comp wallets:', err);
+      return [];
+    }
+  }
+
+  // Comp-list writes are awaited by the admin endpoint (the operator needs to
+  // know it persisted), so failures propagate rather than being swallowed.
+  private async addCompWallet(walletAddress: string, note?: string): Promise<void> {
+    await this.client.query(
+      `INSERT INTO comp_wallets (wallet, note) VALUES ($1, $2)
+       ON CONFLICT (wallet) DO UPDATE SET note = EXCLUDED.note`,
+      [walletAddress, note ?? null],
+    );
+  }
+
+  private async removeCompWallet(walletAddress: string): Promise<void> {
+    await this.client.query('DELETE FROM comp_wallets WHERE wallet = $1', [walletAddress]);
   }
 
   // --------- Lifecycle ---------

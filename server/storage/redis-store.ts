@@ -32,6 +32,7 @@
 import { Redis, type RedisOptions } from 'ioredis';
 
 import type {
+  CompWalletStore,
   EscrowStore,
   EscrowWagerRecord,
   GameLogger,
@@ -78,6 +79,8 @@ export class RedisGameStore {
   readonly raidVault: RaidVaultStore;
   /** Adapter to wire as the `EscrowManager`'s durable `store`. */
   readonly escrow: EscrowStore;
+  /** Adapter to wire as the `CompWalletService`'s durable `store`. */
+  readonly compWallets: CompWalletStore;
 
   private readonly client: RedisClientLike;
   private readonly log: GameLogger;
@@ -85,6 +88,7 @@ export class RedisGameStore {
   private readonly yieldKey: string;
   private readonly raidVaultKey: string;
   private readonly escrowKey: string;
+  private readonly compWalletKey: string;
 
   constructor(config: RedisGameStoreConfig) {
     this.log = config.logger ?? console;
@@ -93,6 +97,7 @@ export class RedisGameStore {
     this.yieldKey = `${prefix}:pending-yield`;
     this.raidVaultKey = `${prefix}:raid-vault`;
     this.escrowKey = `${prefix}:escrow-wager`;
+    this.compWalletKey = `${prefix}:comp-wallets`;
 
     if (config.client) {
       this.client = config.client;
@@ -131,6 +136,11 @@ export class RedisGameStore {
       put: (record) => this.putEscrow(record),
       delete: (wagerId) => this.deleteEscrow(wagerId),
       getUnsettled: () => this.getUnsettledEscrow(),
+    };
+    this.compWallets = {
+      list: () => this.listCompWallets(),
+      add: (wallet, note) => this.addCompWallet(wallet, note),
+      remove: (wallet) => this.removeCompWallet(wallet),
     };
   }
 
@@ -236,6 +246,29 @@ export class RedisGameStore {
       }
     }
     return out;
+  }
+
+  // --------- Comp / holder-gate-bypass wallets ---------
+  //
+  // Stored as a hash field-per-wallet (value = optional note). Like escrow,
+  // writes are awaited by the admin endpoint and propagate on failure.
+
+  private async listCompWallets(): Promise<string[]> {
+    try {
+      const raw = await this.client.hgetall(this.compWalletKey);
+      return Object.keys(raw).sort();
+    } catch (err) {
+      this.log.error('[RedisGameStore] failed to read comp wallets:', err);
+      return [];
+    }
+  }
+
+  private async addCompWallet(walletAddress: string, note?: string): Promise<void> {
+    await this.client.hset(this.compWalletKey, walletAddress, note ?? '');
+  }
+
+  private async removeCompWallet(walletAddress: string): Promise<void> {
+    await this.client.hdel(this.compWalletKey, walletAddress);
   }
 
   // --------- Lifecycle ---------

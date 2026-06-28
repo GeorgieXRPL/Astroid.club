@@ -13,6 +13,7 @@ import type { PriceOracle } from '../chain/price-oracle.js';
 import { runtime } from '../config/runtime.js';
 import { getStakeTier } from '../game/types.js';
 import type { GameWorld } from '../game/world.js';
+import type { CompWalletService } from '../verification/comp-wallets.js';
 
 import type { LogBuffer, LogEntry } from './log-buffer.js';
 
@@ -44,6 +45,8 @@ export interface AdminSnapshotDeps {
     feesCollected: number;
     rentBurned: number;
   } | null;
+  /** Comp/holder-gate-bypass list, when wired. Listed + mutated by the console. */
+  compWallets?: CompWalletService;
 }
 
 export interface AdminPlayer {
@@ -127,6 +130,8 @@ export interface AdminSnapshot {
   raids: ReturnType<GameWorld['getRaidsOverview']>;
   /** Incoming + recently resolved meteor strikes. */
   meteors: ReturnType<GameWorld['getMeteorsOverview']>;
+  /** Wallets comped past the holder gate (operator-managed). */
+  compWallets: string[];
   events: LogEntry[];
   lastEventId: number;
 }
@@ -214,6 +219,7 @@ export function buildAdminSnapshot(
     players,
     raids: world.getRaidsOverview(),
     meteors: world.getMeteorsOverview(),
+    compWallets: deps.compWallets?.list() ?? [],
     events: buffer.recent(opts.eventLimit ?? 300, opts.sinceEventId ?? 0),
     lastEventId: buffer.lastId,
   };

@@ -623,7 +623,8 @@ describe('BG Sim Suite 7: Bet Escrow', () => {
     const resolution = world.betEscrow.resolveRaid('raid-4', 'defender', defenderStakes);
     expect(resolution.winningSide).toBe('defender');
     expect(resolution.totalBurned).toBeGreaterThan(0);
-    expect(resolution.totalDistributedToDefenders).toBe(10); // 10% of 100
+    expect(resolution.totalRecirculated).toBe(40); // 40% of 100 recirculates
+    expect(resolution.totalDistributedToDefenders).toBe(20); // 20% of 100 to defenders
   });
 
   it('Resolve raid: attackers win, bets returned', () => {

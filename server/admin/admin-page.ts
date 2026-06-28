@@ -115,6 +115,15 @@ export const ADMIN_HTML = `<!doctype html>
       </section>
     </div>
     <section>
+      <h2>Comp wallets — holder-gate bypass</h2>
+      <div class="logbar">
+        <input type="text" id="compInput" placeholder="wallet address to comp past the holder gate…" style="flex:1" />
+        <button id="compAddBtn">Add</button>
+        <span class="err" id="compErr"></span>
+      </div>
+      <div style="overflow:auto; max-height:300px"><table id="compWallets"></table></div>
+    </section>
+    <section>
       <h2>Asteroids</h2>
       <div style="overflow:auto"><table id="asteroids"></table></div>
     </section>
@@ -199,6 +208,21 @@ export const ADMIN_HTML = `<!doctype html>
       if (r.status === 401) { lock('Invalid or expired token.'); throw new Error('unauthorized'); }
       if (!r.ok) throw new Error('http ' + r.status);
       return r.json();
+    });
+  }
+
+  // Mutating call (POST/DELETE). Surfaces the server's error message on failure.
+  function apiSend(path, method, body) {
+    return fetch(path, {
+      method: method,
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      if (r.status === 401) { lock('Invalid or expired token.'); throw new Error('unauthorized'); }
+      return r.json().then(function (j) {
+        if (!r.ok) throw new Error(j && j.message ? j.message : 'http ' + r.status);
+        return j;
+      });
     });
   }
 
@@ -422,8 +446,32 @@ export const ADMIN_HTML = `<!doctype html>
     if (!ec.topBalances || !ec.topBalances.length) eh += '<tr><td colspan="2" class="muted" style="padding:14px">No credits yet.</td></tr>';
     document.getElementById('economy').innerHTML = eh + '</tbody>';
 
+    renderComp(d.compWallets || []);
+
     appendLogs(d.events || []);
     if (d.lastEventId) lastEventId = d.lastEventId;
+  }
+
+  function renderComp(list) {
+    var h = '<thead><tr><th>Comped wallet (bypasses holder gate)</th><th class="right">Action</th></tr></thead><tbody>';
+    h += list.map(function (w) {
+      return '<tr><td title="' + esc(w) + '">' + esc(w) + '</td>' +
+        '<td class="right"><button class="comp-rm" data-w="' + esc(w) + '">Remove</button></td></tr>';
+    }).join('');
+    if (!list.length) h += '<tr><td colspan="2" class="muted" style="padding:14px">No comped wallets — everyone enters via the holder gate.</td></tr>';
+    document.getElementById('compWallets').innerHTML = h + '</tbody>';
+  }
+
+  function addComp() {
+    var inp = document.getElementById('compInput');
+    var errEl = document.getElementById('compErr');
+    var w = inp.value.trim();
+    errEl.textContent = '';
+    if (!w) return;
+    apiSend('/admin/api/comp-wallets', 'POST', { wallet: w }).then(function (j) {
+      inp.value = '';
+      renderComp(j.wallets || []);
+    }).catch(function (e) { errEl.textContent = e.message || 'add failed'; });
   }
 
   function appendLogs(events) {
@@ -459,6 +507,17 @@ export const ADMIN_HTML = `<!doctype html>
   };
   document.getElementById('logFilter').addEventListener('input', function () {
     filter = this.value.trim().toLowerCase(); applyFilter();
+  });
+  document.getElementById('compAddBtn').onclick = addComp;
+  document.getElementById('compInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') addComp(); });
+  document.getElementById('compWallets').addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('.comp-rm') : null;
+    if (!btn) return;
+    var w = btn.getAttribute('data-w');
+    if (!w || !confirm('Remove ' + w + ' from the comp list? They will then need to pass the holder gate.')) return;
+    apiSend('/admin/api/comp-wallets', 'DELETE', { wallet: w }).then(function (j) {
+      renderComp(j.wallets || []);
+    }).catch(function (err) { document.getElementById('compErr').textContent = err.message || 'remove failed'; });
   });
 
   if (token) start(); else show('login', true);

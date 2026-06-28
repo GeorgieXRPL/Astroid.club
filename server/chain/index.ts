@@ -194,9 +194,9 @@ export interface ChainOpsImplementations {
   ): Promise<boolean>;
   /** Return a winning raider's escrowed wager (treasury → wallet). */
   returnBetEscrow(walletAddress: string, amount: number, raidId: string): Promise<string>;
-  /** Pay a defender their weighted share of a lost raid's 10% spoils. */
+  /** Pay a defender their stake-weighted share of a lost raid's defender spoils. */
   payBetDefender(walletAddress: string, amount: number, raidId: string): Promise<string>;
-  /** Burn the 90% deflationary sink of a lost raid's forfeited wager. */
+  /** Burn the deflationary-sink share of a lost raid's forfeited wager. */
   burnBetEscrow(amount: number, raidId: string): Promise<string>;
   executeBuyback(amountSol: number): Promise<{ tokensReceived: number; signature: string }>;
   /**
@@ -373,7 +373,7 @@ export class ChainOps {
   }
 
   /**
-   * Pay a defender their weighted share of a lost raid's 10% spoils.
+   * Pay a defender their stake-weighted share of a lost raid's defender spoils.
    * Server-signed treasury → defender transfer. Returns the signature.
    */
   async payBetDefender(
@@ -389,7 +389,7 @@ export class ChainOps {
   }
 
   /**
-   * Burn the 90% deflationary sink of a lost raid's forfeited wager.
+   * Burn the deflationary-sink share of a lost raid's forfeited wager.
    * Server-signed SPL burn from the escrow. Returns the signature.
    */
   async burnBetEscrow(amount: number, raidId: string): Promise<ChainTxResult> {

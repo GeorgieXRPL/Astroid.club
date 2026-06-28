@@ -5,13 +5,14 @@
  * duplicate-id rejection), bet placement (active/resolved gating,
  * one-bet-per-wallet rule, attacker-vs-defender side accounting),
  * BetEscrowLike queries (hasLockedBets, getLockedBetAmount,
- * getActiveBets), resolution math (winner returns, 90% burn / 10%
- * defender split, stake-weighted defender payouts including the
- * floor-rounding behaviour), pool cleanup, and aggregate stats.
+ * getActiveBets), resolution math (winner returns, the three-way loss
+ * split, stake-weighted defender payouts including floor-rounding),
+ * pool cleanup, and aggregate stats.
  *
- * Numerical constants under test: `BURN_SHARE_OF_LOSING_BETS = 0.9`
- * and `DEFENDER_SHARE_OF_LOSING_BETS = 0.1`. These are preserved
- * verbatim from BG.
+ * Loss split under test (basis points, default 40/40/20): burn /
+ * recirculate / defender. The three legs always sum EXACTLY to the
+ * forfeited total, and any UNDELIVERED defender share (no eligible
+ * defenders, or floor dust) rolls into recirculation rather than burning.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -204,6 +205,7 @@ describe('BetEscrow resolveRaid', () => {
     const r = e.resolveRaid('r1', 'attacker', new Map());
 
     expect(r.totalBurned).toBe(0);
+    expect(r.totalRecirculated).toBe(0);
     expect(r.totalDistributedToDefenders).toBe(0);
     expect(r.totalReturnedToWinners).toBe(160);
     expect(r.winnerPayouts.get(ALICE)).toBe(100);
@@ -213,23 +215,25 @@ describe('BetEscrow resolveRaid', () => {
     expect(e.getBet(e.getRaidPool('r1')!.attackerBets.get(ALICE)!.id)?.status).toBe('won');
   });
 
-  it('defenders win: 90% of every bet burned, 10% to defenders', () => {
+  it('defenders win: forfeit split 40% burn / 40% recirculate / 20% defenders', () => {
     const e = makeEscrow();
     e.createRaidPool('r1', 'T', 'S');
     e.placeBet('r1', ALICE, 'S', 100, 'attacker', 'a');
     e.placeBet('r1', BOB, 'S', 50, 'attacker', 'b');
 
-    // CAROL is the only defender.
+    // CAROL is the only defender → takes the whole 20% pool.
     const r = e.resolveRaid('r1', 'defender', new Map([[CAROL, 1000]]));
 
-    // ALICE 100: floor(100*0.9)=90 burned, 10 to defenders.
-    // BOB 50:   floor(50*0.9)=45 burned, 5 to defenders.
-    expect(r.totalBurned).toBe(135);
-    expect(r.totalDistributedToDefenders).toBe(15);
+    // forfeited 150 → defenders floor(100*.2)+floor(50*.2)=30,
+    //                 recirculate floor(100*.4)+floor(50*.4)=60, burn remainder=60.
+    expect(r.totalDistributedToDefenders).toBe(30);
+    expect(r.totalRecirculated).toBe(60);
+    expect(r.totalBurned).toBe(60);
     expect(r.totalReturnedToWinners).toBe(0);
     expect(r.winnerPayouts.size).toBe(0);
-    // CAROL gets 100% of the spoils.
-    expect(r.defenderPayouts.get(CAROL)).toBe(15);
+    expect(r.defenderPayouts.get(CAROL)).toBe(30);
+    // The three legs sum exactly to the forfeited total (escrow nets to zero).
+    expect(r.totalDistributedToDefenders + r.totalRecirculated + r.totalBurned).toBe(150);
 
     expect(e.getBet(e.getRaidPool('r1')!.attackerBets.get(ALICE)!.id)?.status).toBe('lost');
   });
@@ -239,8 +243,8 @@ describe('BetEscrow resolveRaid', () => {
     e.createRaidPool('r1', 'T', 'S');
     e.placeBet('r1', ALICE, 'S', 1000, 'attacker', 'a');
 
-    // ALICE 1000: floor(1000*0.9)=900 burned, 100 to defenders.
-    // CAROL has 3x BOB's stake -> CAROL gets 75, BOB gets 25.
+    // 1000 forfeit → defender pool 200, recirculate 400, burn 400.
+    // CAROL has 3x BOB's stake → CAROL gets 150, BOB gets 50 (of the 200).
     const r = e.resolveRaid(
       'r1',
       'defender',
@@ -250,18 +254,19 @@ describe('BetEscrow resolveRaid', () => {
       ]),
     );
 
-    expect(r.totalBurned).toBe(900);
-    expect(r.totalDistributedToDefenders).toBe(100);
-    expect(r.defenderPayouts.get(BOB)).toBe(25);
-    expect(r.defenderPayouts.get(CAROL)).toBe(75);
+    expect(r.totalDistributedToDefenders).toBe(200);
+    expect(r.totalRecirculated).toBe(400);
+    expect(r.totalBurned).toBe(400);
+    expect(r.defenderPayouts.get(BOB)).toBe(50);
+    expect(r.defenderPayouts.get(CAROL)).toBe(150);
   });
 
-  it('floor-rounding can drop dust on uneven splits (BG quirk preserved)', () => {
+  it('floor dust on an uneven defender split recirculates (never lost/burned)', () => {
     const e = makeEscrow();
     e.createRaidPool('r1', 'T', 'S');
-    e.placeBet('r1', ALICE, 'S', 100, 'attacker', 'a'); // pool = 10 to defenders
+    e.placeBet('r1', ALICE, 'S', 100, 'attacker', 'a'); // defender pool = 20
 
-    // 3 equal-stake defenders: 10 / 3 = 3.33 → floor → 3 each → 9 total, 1 lost.
+    // 3 equal-stake defenders: 20 / 3 = 6.67 → floor → 6 each → 18 paid, 2 dust.
     const r = e.resolveRaid(
       'r1',
       'defender',
@@ -272,29 +277,31 @@ describe('BetEscrow resolveRaid', () => {
       ]),
     );
 
-    expect(r.totalDistributedToDefenders).toBe(10);
-    expect(r.defenderPayouts.get(BOB)).toBe(3);
-    expect(r.defenderPayouts.get(CAROL)).toBe(3);
-    expect(r.defenderPayouts.get('wallet_dave')).toBe(3);
+    expect(r.defenderPayouts.get(BOB)).toBe(6);
+    expect(r.defenderPayouts.get(CAROL)).toBe(6);
+    expect(r.defenderPayouts.get('wallet_dave')).toBe(6);
+    expect(r.totalDistributedToDefenders).toBe(18);
+    // recirculate base 40 + 2 undelivered defender dust = 42; burn remainder 40.
+    expect(r.totalRecirculated).toBe(42);
+    expect(r.totalBurned).toBe(40);
+    expect(r.totalDistributedToDefenders + r.totalRecirculated + r.totalBurned).toBe(100);
   });
 
-  it('floor-to-zero entries leak in (BG quirk: `share > 0` check is pre-floor)', () => {
+  it('floor-to-zero defender entries no longer leak in (share floored before the > 0 check)', () => {
     const e = makeEscrow();
     e.createRaidPool('r1', 'T', 'S');
-    e.placeBet('r1', ALICE, 'S', 5, 'attacker', 'a'); // pool = floor(5*0.9)=4, defenders=1
+    e.placeBet('r1', ALICE, 'S', 5, 'attacker', 'a'); // defender pool = floor(5*.2)=1
 
-    // 100 defenders with stake 1 each. Each share = (1/100)*1 = 0.01.
-    // BG checks `if (share > 0)` against the unfloored value (0.01 > 0 = true),
-    // then stores `Math.floor(0.01) = 0`. Result: all 100 defenders in the
-    // map with value 0. Verbatim BG behaviour, preserved here.
+    // 100 defenders, stake 1 each → each share = floor((1/100)*1) = 0 → excluded.
     const stakes = new Map<string, number>();
     for (let i = 0; i < 100; i++) stakes.set(`def${i}`, 1);
 
     const r = e.resolveRaid('r1', 'defender', stakes);
-    expect(r.defenderPayouts.size).toBe(100);
-    for (const value of r.defenderPayouts.values()) {
-      expect(value).toBe(0);
-    }
+    // No zero-value entries pollute the map; the 1-token pool recirculates.
+    expect(r.defenderPayouts.size).toBe(0);
+    expect(r.totalDistributedToDefenders).toBe(0);
+    expect(r.totalRecirculated).toBe(3); // recirc floor(5*.4)=2 + 1 undelivered defender
+    expect(r.totalBurned).toBe(2);
   });
 
   it('defenders win with no attacker bets: empty resolution', () => {
@@ -302,20 +309,23 @@ describe('BetEscrow resolveRaid', () => {
     e.createRaidPool('r1', 'T', 'S');
     const r = e.resolveRaid('r1', 'defender', new Map([[BOB, 100]]));
     expect(r.totalBurned).toBe(0);
+    expect(r.totalRecirculated).toBe(0);
     expect(r.totalDistributedToDefenders).toBe(0);
     expect(r.defenderPayouts.size).toBe(0);
   });
 
-  it('defenders win with no defender stakes: 10% share is "lost" (BG behaviour)', () => {
+  it('defenders win with no defender stakes: the 20% share recirculates (not lost)', () => {
     const e = makeEscrow();
     e.createRaidPool('r1', 'T', 'S');
     e.placeBet('r1', ALICE, 'S', 100, 'attacker', 'a');
 
     const r = e.resolveRaid('r1', 'defender', new Map());
 
-    expect(r.totalBurned).toBe(90);
-    expect(r.totalDistributedToDefenders).toBe(10);
-    // No defender stakes -> nothing is paid out -> 10 effectively "lost".
+    // No eligible defender → 20 defender pool rolls into recirculation (40+20),
+    // leaving only the 40 burn share.
+    expect(r.totalDistributedToDefenders).toBe(0);
+    expect(r.totalRecirculated).toBe(60);
+    expect(r.totalBurned).toBe(40);
     expect(r.defenderPayouts.size).toBe(0);
   });
 

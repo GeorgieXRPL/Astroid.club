@@ -26,6 +26,7 @@ import type { AstroidRuntime } from '../../server/config/runtime.js';
 import type { GameLogger } from '../../server/game/interfaces.js';
 import { GameWorld } from '../../server/game/world.js';
 import { AstroidGateway } from '../../server/net/gateway.js';
+import { CompWalletService } from '../../server/verification/comp-wallets.js';
 
 const silentLogger: GameLogger = {
   info: () => {},
@@ -72,6 +73,8 @@ interface HarnessOptions {
   chainOps?: ChainOps;
   /** Optional wallet allowlist forwarded to the gateway. */
   walletAllowlist?: readonly string[];
+  /** Optional comp/holder-gate-bypass service forwarded to the gateway. */
+  compWallets?: CompWalletService;
 }
 
 /**
@@ -95,6 +98,7 @@ function makeChainOps(verifyHolderImpl: (wallet: string) => Promise<boolean>): C
     holderPrewarmMaxLookback: 100,
     corsAllowedOrigins: ['http://localhost:3000'],
     walletAllowlist: [],
+    compWalletSeed: [],
     adminSecret: undefined,
     redisUrl: undefined,
     databaseUrl: undefined,
@@ -129,6 +133,7 @@ async function startHarness(opts: HarnessOptions = {}): Promise<Harness> {
     heartbeatMs: 0,
     ...(opts.chainOps && { chainOps: opts.chainOps }),
     ...(opts.walletAllowlist && { walletAllowlist: opts.walletAllowlist }),
+    ...(opts.compWallets && { compWallets: opts.compWallets }),
   });
   gateway.start();
   return { gateway, world, httpServer, port };
@@ -492,6 +497,38 @@ describe('AstroidGateway verify_holder', () => {
     return { sock, wallet: walletAddress };
   }
 
+  it('comped wallets bypass the holder gate even when chain says not qualified', async () => {
+    // Chain gate would REJECT this wallet (returns not-qualified)…
+    const chainOps = makeChainOps(async () => false);
+    const compWallets = new CompWalletService({
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    const h = await startHarness({ chainOps, compWallets });
+    const { sock, wallet } = await authedSocket(h.port);
+
+    // …but once the operator comps it, verify_holder reports eligible/qualified.
+    await compWallets.add(wallet, 'test');
+    const reply = (await send(sock, { type: 'verify_holder', requestId: 'vc' })) as {
+      type: string;
+      data: { eligible: boolean; reason: string; walletAddress: string };
+    };
+    expect(reply.type).toBe('result');
+    expect(reply.data.eligible).toBe(true);
+    expect(reply.data.reason).toBe('qualified');
+    expect(reply.data.walletAddress).toBe(wallet);
+
+    // Removing the comp restores the gate's verdict (not qualified).
+    await compWallets.remove(wallet);
+    const after = (await send(sock, { type: 'verify_holder', requestId: 'vc2' })) as {
+      data: { eligible: boolean; reason: string };
+    };
+    expect(after.data.eligible).toBe(false);
+    expect(after.data.reason).toBe('not_qualified');
+
+    sock.close();
+    await stopHarness(h);
+  });
+
   it('rejects verify_holder before authentication', async () => {
     const h = await startHarness();
     const sock = await openSocket(h.port);
@@ -551,6 +588,7 @@ describe('AstroidGateway verify_holder', () => {
       holderPrewarmMaxLookback: 100,
       corsAllowedOrigins: ['http://localhost:3000'],
       walletAllowlist: [],
+      compWalletSeed: [],
       adminSecret: undefined,
       redisUrl: undefined,
       databaseUrl: undefined,
@@ -636,6 +674,7 @@ describe('AstroidGateway verify_holder', () => {
       holderPrewarmMaxLookback: 100,
       corsAllowedOrigins: ['http://localhost:3000'],
       walletAllowlist: [],
+      compWalletSeed: [],
       adminSecret: undefined,
       redisUrl: undefined,
       databaseUrl: undefined,
@@ -742,6 +781,7 @@ describe('AstroidGateway on-chain staking messages', () => {
       holderPrewarmMaxLookback: 100,
       corsAllowedOrigins: ['http://localhost:3000'],
       walletAllowlist: [],
+      compWalletSeed: [],
       adminSecret: undefined,
       redisUrl: undefined,
       databaseUrl: undefined,
@@ -1149,6 +1189,7 @@ describe('AstroidGateway wager-deposit messages', () => {
       holderPrewarmMaxLookback: 100,
       corsAllowedOrigins: ['http://localhost:3000'],
       walletAllowlist: [],
+      compWalletSeed: [],
       adminSecret: undefined,
       redisUrl: undefined,
       databaseUrl: undefined,

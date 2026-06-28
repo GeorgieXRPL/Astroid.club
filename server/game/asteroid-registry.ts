@@ -49,13 +49,23 @@ export interface AsteroidRegistryConfig {
   logger?: GameLogger;
 }
 
-/** Defense-buff tuning constants — preserved verbatim from BG. */
+/**
+ * Post-defense raid-immunity window (minutes). Tunable per-deployment via
+ * RAID_IMMUNITY_MIN; defaults to 30 (softened from BG's 2h so an asteroid
+ * re-enters the raid pool sooner and the loop stays active).
+ */
+const RAID_IMMUNITY_MIN = (() => {
+  const n = Number(process.env.RAID_IMMUNITY_MIN);
+  return Number.isFinite(n) && n >= 0 ? n : 30;
+})();
+
+/** Defense-buff tuning constants. */
 const DEFENSE_BUFF = {
-  /** 2-hour raid-immunity window after a successful defense. */
-  IMMUNITY_MS: 2 * 60 * 60 * 1000,
+  /** Raid-immunity window after a successful defense (env: RAID_IMMUNITY_MIN, default 30m). */
+  IMMUNITY_MS: RAID_IMMUNITY_MIN * 60 * 1000,
   /** 10% drill-power boost on top of immunity. */
   DRILL_POWER_BOOST: 1.1,
-  /** 1-hour drill-power boost window (immunity outlasts it). */
+  /** 1-hour drill-power boost window (now outlasts the shorter immunity window). */
   BOOST_MS: 60 * 60 * 1000,
 } as const;
 
@@ -355,10 +365,12 @@ export class AsteroidRegistry implements AsteroidRegistryLike {
   }
 
   /**
-   * Drop expired buffs/debuffs from all asteroids. Mirrors BG's
-   * two-stage logic: defense buff has separate immunity and boost
-   * windows — if the boost expires first, it's reduced to 1.0 while
-   * immunity continues; only when both are past does the buff clear.
+   * Drop expired buffs/debuffs from all asteroids. Two-stage logic: the
+   * defense buff has separate immunity and boost windows. With the default
+   * 30m immunity / 1h boost, immunity lifts first (the asteroid is raidable
+   * again) while the drill-power boost lingers; if instead the boost expires
+   * first it's reduced to 1.0 while immunity continues. Only when both
+   * windows are past does the buff clear entirely.
    */
   clearExpiredEffects(): void {
     const now = new Date();

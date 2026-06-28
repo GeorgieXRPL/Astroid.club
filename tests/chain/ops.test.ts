@@ -49,6 +49,7 @@ function offRuntime(): AstroidRuntime {
     holderPrewarmMaxLookback: 100,
     corsAllowedOrigins: ['*'],
     walletAllowlist: [],
+    compWalletSeed: [],
     adminSecret: undefined,
     redisUrl: undefined,
     databaseUrl: undefined,

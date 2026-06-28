@@ -47,6 +47,11 @@ export interface EscrowChainOps {
   returnWager(wallet: string, amount: number, wagerId: string): Promise<string>;
   payDefender(wallet: string, amount: number, wagerId: string): Promise<string>;
   burnWager(amount: number, wagerId: string): Promise<string>;
+  /**
+   * Move a forfeited wager's recirculated share to the treasury that backs
+   * raid vaults (a no-op self-transfer in the single-wallet model).
+   */
+  recirculateToTreasury(amount: number, wagerId: string): Promise<string>;
 }
 
 export interface EscrowManagerConfig {
@@ -150,8 +155,14 @@ export class EscrowManager {
         legs.push({ kind: 'payout', wallet: payout.wallet, amount: payout.amount, done: false });
       }
     }
+    // Recirculate (move to the backing treasury) before the burn — it's a
+    // recoverable transfer, so running it ahead of the irreversible burn keeps
+    // the value-preserving leg safe if a later leg fails.
+    if (plan.recirculate && plan.recirculate > 0) {
+      legs.push({ kind: 'recirculate', amount: plan.recirculate, done: false });
+    }
     // Burn last so a partial failure leaves tokens in escrow rather than over-
-    // burning before defenders are paid.
+    // burning before defenders are paid / value is recirculated.
     if (plan.burn && plan.burn > 0) {
       legs.push({ kind: 'burn', amount: plan.burn, done: false });
     }
@@ -213,6 +224,8 @@ export class EscrowManager {
         return this.chain.returnWager(leg.wallet!, leg.amount, wagerId);
       case 'payout':
         return this.chain.payDefender(leg.wallet!, leg.amount, wagerId);
+      case 'recirculate':
+        return this.chain.recirculateToTreasury(leg.amount, wagerId);
       case 'burn':
         return this.chain.burnWager(leg.amount, wagerId);
     }

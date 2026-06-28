@@ -3,9 +3,20 @@
  *
  * Ported from `Black-Gold-main/server/game/bet-escrow.ts` per
  * `docs/PORTING_NOTES.md`. The bet-pool lifecycle (create → place →
- * locked → resolve → cleanup), the lookup indexes (by raid, by
- * wallet), and the resolution math (90% burn / 10% defender share,
- * weighted by stake) are byte-identical to BG.
+ * locked → resolve → cleanup) and the lookup indexes (by raid, by
+ * wallet) are byte-identical to BG.
+ *
+ * Resolution math DIVERGES from BG's fixed 90/10. As whale wager sizes
+ * grew, a flat 90% burn was needlessly destructive, so a forfeited wager
+ * is now split THREE ways (env-tunable, defaults 40/40/20):
+ *   - **burn** — permanent deflationary sink;
+ *   - **recirculate** — paid back into OTHER asteroids' raid vaults as
+ *     fresh stealable bounty, keeping value in play instead of destroying
+ *     it (the on-chain leg moves the tokens to the redeemer treasury that
+ *     backs those vaults; see `world.settleEscrowedWager`); and
+ *   - **defender spoils** — stake-weighted reward to the successful
+ *     defenders. When nobody is eligible, the undelivered defender share
+ *     rolls into recirculation rather than being burned/lost.
  *
  * Architectural change: BG's class did two things — track bets in
  * memory **and** build Solana transactions (deposit, payout, burn) via
@@ -73,9 +84,11 @@ export interface EscrowResolution {
   totalBurned: number;
   totalReturnedToWinners: number;
   totalDistributedToDefenders: number;
+  /** Recirculated to other asteroids' vaults (fresh stealable bounty). */
+  totalRecirculated: number;
   /** Attackers who won their bets back (wallet -> amount). */
   winnerPayouts: Map<string, number>;
-  /** Defenders' weighted share of the 10% spoils (wallet -> amount). */
+  /** Defenders' stake-weighted share of the spoils (wallet -> amount). */
   defenderPayouts: Map<string, number>;
 }
 
@@ -102,13 +115,51 @@ export interface BetEscrowConfig {
 }
 
 /**
- * Burn share of lost bets — preserved verbatim from BG. The defender
- * share is implicitly `(1 - BURN_SHARE_OF_LOSING_BETS)` and is computed
- * per-bet as `bet.amount - burnAmount` (BG used subtraction rather
- * than a separate constant; we do too, so a defender-only constant
- * would be unused noise).
+ * Three-way split of a forfeited wager, in basis points (1/10000). Defaults
+ * 40% burn / 40% recirculate / 20% defenders; env-overridable via
+ * `RAID_LOSS_BURN_BPS` / `RAID_LOSS_RECIRCULATE_BPS` / `RAID_LOSS_DEFENDER_BPS`.
+ * The three MUST sum to 10000; an invalid sum falls back to the default rather
+ * than silently mis-routing forfeited funds.
  */
-const BURN_SHARE_OF_LOSING_BETS = 0.9;
+const DEFAULT_LOSS_SPLIT = { burnBps: 4000, recirculateBps: 4000, defenderBps: 2000 } as const;
+
+function readBps(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw == null) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+let lossBurnBps = readBps('RAID_LOSS_BURN_BPS', DEFAULT_LOSS_SPLIT.burnBps);
+let lossRecirculateBps = readBps('RAID_LOSS_RECIRCULATE_BPS', DEFAULT_LOSS_SPLIT.recirculateBps);
+let lossDefenderBps = readBps('RAID_LOSS_DEFENDER_BPS', DEFAULT_LOSS_SPLIT.defenderBps);
+
+function normalizeLossSplit(): void {
+  if (lossBurnBps + lossRecirculateBps + lossDefenderBps !== 10_000) {
+    lossBurnBps = DEFAULT_LOSS_SPLIT.burnBps;
+    lossRecirculateBps = DEFAULT_LOSS_SPLIT.recirculateBps;
+    lossDefenderBps = DEFAULT_LOSS_SPLIT.defenderBps;
+  }
+}
+normalizeLossSplit();
+
+/** Override the forfeited-wager split (basis points). For boot validation + tests. */
+export function setRaidLossSplit(split: {
+  burnBps: number;
+  recirculateBps: number;
+  defenderBps: number;
+}): void {
+  lossBurnBps = split.burnBps;
+  lossRecirculateBps = split.recirculateBps;
+  lossDefenderBps = split.defenderBps;
+  normalizeLossSplit();
+}
+
+/** The active forfeited-wager split (basis points). */
+export function getRaidLossSplit(): { burnBps: number; recirculateBps: number; defenderBps: number } {
+  return { burnBps: lossBurnBps, recirculateBps: lossRecirculateBps, defenderBps: lossDefenderBps };
+}
+
 /** Default cleanup window for resolved pools (24h) — preserved verbatim from BG. */
 const DEFAULT_CLEANUP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -276,12 +327,15 @@ export class BetEscrow implements BetEscrowLike {
   // --------- Resolution ---------
 
   /**
-   * Settle a raid: mark every attacker bet as won/lost, compute the
-   * defender spoils pool (10% of lost bet value), and distribute it
-   * weighted by `defenderStakes`. The defender share is floored per
-   * recipient — this preserves BG's exact integer-rounding behaviour
-   * (small dust may be lost on the floor; intentional and verified
-   * in tests).
+   * Settle a raid: mark every attacker bet won/lost, then (on a defender win)
+   * split the forfeited wager three ways — burn / recirculate / defender
+   * spoils — per the configured basis-point split. The defender pool is
+   * distributed weighted by `defenderStakes` and floored per recipient (BG's
+   * integer-rounding behaviour; small dust may be lost on the floor). Any
+   * UNDELIVERED defender share (no eligible defenders, or weighting dust)
+   * rolls into recirculation so it stays in play rather than being burned.
+   * Burn absorbs the final remainder so the three legs sum EXACTLY to the
+   * forfeited total (the on-chain escrow nets to zero).
    */
   resolveRaid(
     raidId: string,
@@ -300,12 +354,16 @@ export class BetEscrow implements BetEscrowLike {
       raidId,
       winningSide,
       totalBurned: 0,
+      totalRecirculated: 0,
       totalReturnedToWinners: 0,
       totalDistributedToDefenders: 0,
       winnerPayouts: new Map(),
       defenderPayouts: new Map(),
     };
 
+    let forfeited = 0;
+    let defenderPoolTarget = 0;
+    let recirculateTarget = 0;
     for (const [walletAddress, bet] of pool.attackerBets) {
       if (winningSide === 'attacker') {
         bet.status = 'won';
@@ -315,23 +373,34 @@ export class BetEscrow implements BetEscrowLike {
       } else {
         bet.status = 'lost';
         bet.resolvedAt = new Date();
-        const burnAmount = Math.floor(bet.amount * BURN_SHARE_OF_LOSING_BETS);
-        const defenderShare = bet.amount - burnAmount;
-        resolution.totalBurned += burnAmount;
-        resolution.totalDistributedToDefenders += defenderShare;
+        forfeited += bet.amount;
+        defenderPoolTarget += Math.floor((bet.amount * lossDefenderBps) / 10_000);
+        recirculateTarget += Math.floor((bet.amount * lossRecirculateBps) / 10_000);
       }
     }
 
-    if (winningSide === 'defender' && resolution.totalDistributedToDefenders > 0) {
+    let actualToDefenders = 0;
+    if (winningSide === 'defender' && defenderPoolTarget > 0) {
       const totalDefenderStake = Array.from(defenderStakes.values()).reduce((a, b) => a + b, 0);
       if (totalDefenderStake > 0) {
         for (const [walletAddress, stake] of defenderStakes) {
-          const share = (stake / totalDefenderStake) * resolution.totalDistributedToDefenders;
+          const share = Math.floor((stake / totalDefenderStake) * defenderPoolTarget);
           if (share > 0) {
-            resolution.defenderPayouts.set(walletAddress, Math.floor(share));
+            resolution.defenderPayouts.set(walletAddress, share);
+            actualToDefenders += share;
           }
         }
       }
+    }
+
+    if (winningSide === 'defender') {
+      // Undelivered defender share (no eligible defenders / weighting dust)
+      // recirculates rather than burning. Burn takes the final remainder so
+      // defenders + recirculate + burn === forfeited exactly.
+      const undeliveredDefender = defenderPoolTarget - actualToDefenders;
+      resolution.totalDistributedToDefenders = actualToDefenders;
+      resolution.totalRecirculated = recirculateTarget + undeliveredDefender;
+      resolution.totalBurned = forfeited - actualToDefenders - resolution.totalRecirculated;
     }
 
     pool.status = 'resolved';
@@ -340,7 +409,8 @@ export class BetEscrow implements BetEscrowLike {
 
     this.log.info(
       `[BetEscrow] Raid ${raidId} resolved: ${winningSide} won. ` +
-        `Burned: ${resolution.totalBurned}, Returned: ${resolution.totalReturnedToWinners}, ` +
+        `Returned: ${resolution.totalReturnedToWinners}, Burned: ${resolution.totalBurned}, ` +
+        `Recirculated: ${resolution.totalRecirculated}, ` +
         `Defender spoils: ${resolution.totalDistributedToDefenders}`,
     );
     return resolution;

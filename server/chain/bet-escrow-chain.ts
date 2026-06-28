@@ -24,10 +24,14 @@
  *      because a deposit funds payouts we later make).
  *   3. **returnWager** (escrow → winner): treasury-signed transfer back to a
  *      winning raider. Server-signed + confirmed, like `redeemer.bridge`.
- *   4. **burnWager** / **payDefender** (escrow → void / defenders): on a
- *      LOSS, the ledger's resolution burns 90% and splits 10% to defenders
- *      weighted by stake. `burnWager` SPL-burns the treasury's tokens;
- *      `payDefender` transfers a defender's share to their ATA.
+ *   4. **burnWager** / **payDefender** / **recirculateToTreasury** (escrow →
+ *      void / defenders / backing treasury): on a LOSS, the ledger's
+ *      resolution splits the forfeited wager three ways (default 40% burn /
+ *      40% recirculate / 20% defenders, weighted by stake). `burnWager`
+ *      SPL-burns the treasury's tokens; `payDefender` transfers a defender's
+ *      share to their ATA; `recirculateToTreasury` moves the recirculated
+ *      share to the redeemer treasury that backs raid vaults (a no-op
+ *      self-transfer when escrow already IS that treasury).
  *
  * Plus a deflationary **rent-offset burn**: whenever a settlement transfer
  * (return/payout) has to CREATE a recipient ATA, the escrow wallet fronts
@@ -549,14 +553,41 @@ export class BetEscrowChainService {
   }
 
   /**
-   * Pay a defender their weighted share of the 10% spoils from a LOST raid.
-   * Same mechanics as {@link returnWager}; separate memo for auditability.
+   * Pay a defender their stake-weighted share of the defender spoils from a
+   * LOST raid (default 20%). Same mechanics as {@link returnWager}; separate
+   * memo for auditability.
    */
   async payDefender(walletAddress: string, amount: number, raidId: string): Promise<string> {
     return this.transferFromEscrow(
       walletAddress,
       amount,
       `${WAGER_MEMO_PREFIX}_spoils:${raidId}`,
+    );
+  }
+
+  /**
+   * Move a forfeited wager's recirculated share to the treasury that backs the
+   * raid vaults (the {@link BetEscrowChainConfig.feeDestination}, i.e. the
+   * redeemer treasury in the dedicated-escrow model). The in-game vault credit
+   * is applied by the world at resolve time; this leg moves the real tokens so
+   * the increased vault liability stays backed.
+   *
+   * In the single-wallet model the escrow IS that treasury, so the tokens are
+   * already in the backing reserve — we skip the pointless self-transfer and
+   * return a sentinel signature so the settlement leg is marked done.
+   */
+  async recirculateToTreasury(amount: number, raidId: string): Promise<string> {
+    if (this.config.feeDestination.equals(this.config.treasury.publicKey)) {
+      this.log.info?.(
+        `[bet-escrow] recirculate ${amount} $ASTROID for raid ${raidId.slice(0, 8)}… ` +
+          'is a no-op (escrow IS the backing treasury); tokens already in reserve.',
+      );
+      return `recirculate-self:${raidId}`;
+    }
+    return this.transferFromEscrow(
+      this.config.feeDestination.toBase58(),
+      amount,
+      `${WAGER_MEMO_PREFIX}_recirculate:${raidId}`,
     );
   }
 
@@ -651,9 +682,10 @@ export class BetEscrowChainService {
   }
 
   /**
-   * Burn `amount` $ASTROID from the escrow — the 90% deflationary sink for a
-   * LOST raid's forfeited wager. Treasury-signed SPL burn. Resolves with the
-   * base58 signature; throws a sanitized error on failure.
+   * Burn `amount` $ASTROID from the escrow — the deflationary sink share of a
+   * LOST raid's forfeited wager (default 40%; see the loss split in
+   * `bet-escrow.ts`). Treasury-signed SPL burn. Resolves with the base58
+   * signature; throws a sanitized error on failure.
    */
   async burnWager(amount: number, raidId: string): Promise<string> {
     const splToken = loadSplToken();

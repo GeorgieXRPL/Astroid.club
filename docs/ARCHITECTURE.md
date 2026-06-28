@@ -87,7 +87,7 @@ server/
 │   ├── cooldowns.ts           ← per-(wallet,action) expiry timestamps
 │   ├── expedition-tracker.ts  ← active-expedition records; join/leave; bet validation (≤20% stake)
 │   ├── raid-engine.ts         ← raid resolution (1.2× defender advantage); pending-yield steal
-│   ├── bet-escrow.ts          ← in-memory ledger for bet pools (90% burn / 10% defender share)
+│   ├── bet-escrow.ts          ← in-memory ledger for bet pools (loss split: 40% burn / 40% recirculate-to-vaults / 20% defenders, env-tunable)
 │   ├── refinery-manager.ts    ← per-asteroid yield accumulator; finder/refinery split (70/30); distribution math
 │   ├── distribution-service.ts← per-second drill-power-seconds accrual; routes to chain or addPendingYield
 │   ├── yield-orchestrator.ts  ← periodic distribute-all loop; chain-gated payout
@@ -314,10 +314,18 @@ flowchart TD
   V -->|ok| BK["recordBooked (liability) + placeBet"]
   BK --> R{"raid result"}
   R -->|win| RET["returnWager → winner (full wager back)"]
-  R -->|loss| BRN["burn 90% + payDefender 10% (stake-weighted)"]
+  R -->|loss| BRN["3-way split (default 40/40/20):<br/>burnWager 40% + recirculateToTreasury 40%<br/>(→ other asteroids' vaults) + payDefender 20% (stake-weighted)"]
   RET --> RBN["if recipient ATA created → rent-offset burn<br/>(oracle-priced $ASTROID ≈ 0.002 SOL rent),<br/>surplus-only guard: never touches liability"]
   BRN --> RBN
 ```
+
+On a loss the forfeit is split three ways (`RAID_LOSS_BURN_BPS` /
+`RAID_LOSS_RECIRCULATE_BPS` / `RAID_LOSS_DEFENDER_BPS`, must sum to 10000): the
+**recirculate** share is credited to OTHER asteroids' raid vaults in-game (fresh
+stealable bounty) and moved on-chain to the redeemer treasury that backs those
+vaults, so value stays in play instead of being destroyed. Undelivered defender
+share (no eligible defenders) rolls into recirculation; burn takes the remainder
+so the legs sum exactly to the wager (escrow nets to zero).
 
 - **Fee** (`ESCROW_FEE_BPS` + `ESCROW_FEE_FLAT`, default 2% + 5,000): charged
   on top, → treasury revenue. The escrow ATA still receives exactly the wager,

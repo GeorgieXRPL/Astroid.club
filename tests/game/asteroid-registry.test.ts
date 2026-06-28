@@ -153,14 +153,14 @@ describe('AsteroidRegistry buffs and debuffs', () => {
     vi.useRealTimers();
   });
 
-  it('applyDefenseBuff sets immunity (2h) and drill-power boost (1h, 1.1x)', () => {
+  it('applyDefenseBuff sets immunity (30m) and drill-power boost (1h, 1.1x)', () => {
     const r = makeRegistry(def('A'));
     r.applyDefenseBuff('A');
     const a = r.getAsteroid('A')!;
     expect(a.defenseBuff).not.toBeNull();
     expect(a.defenseBuff!.drillPowerBoost).toBeCloseTo(1.1, 10);
     expect(a.defenseBuff!.boostExpiresAt.getTime() - Date.now()).toBe(60 * 60 * 1000);
-    expect(a.defenseBuff!.immuneUntil.getTime() - Date.now()).toBe(2 * 60 * 60 * 1000);
+    expect(a.defenseBuff!.immuneUntil.getTime() - Date.now()).toBe(30 * 60 * 1000);
     expect(r.hasRaidImmunity('A')).toBe(true);
   });
 
@@ -173,20 +173,20 @@ describe('AsteroidRegistry buffs and debuffs', () => {
     expect(a.attackDebuff!.expiresAt.getTime() - Date.now()).toBe(30 * 60 * 1000);
   });
 
-  it('clearExpiredEffects: boost expires first, immunity stays, buff fully clears at 2h', () => {
+  it('clearExpiredEffects: immunity expires first, boost stays, buff fully clears at 1h', () => {
     const r = makeRegistry(def('A'));
     r.applyDefenseBuff('A');
 
-    // 1h passes — boost expires, immunity remains.
-    vi.advanceTimersByTime(60 * 60 * 1000 + 1);
+    // 30m passes — immunity lifts (asteroid raidable again), boost remains.
+    vi.advanceTimersByTime(30 * 60 * 1000 + 1);
     r.clearExpiredEffects();
     const a1 = r.getAsteroid('A')!;
     expect(a1.defenseBuff).not.toBeNull();
-    expect(a1.defenseBuff!.drillPowerBoost).toBe(1.0);
-    expect(r.hasRaidImmunity('A')).toBe(true);
+    expect(a1.defenseBuff!.drillPowerBoost).toBeCloseTo(1.1, 10);
+    expect(r.hasRaidImmunity('A')).toBe(false);
 
-    // Another 1h passes — immunity also expires; buff cleared.
-    vi.advanceTimersByTime(60 * 60 * 1000);
+    // Reaching 1h total — boost also expires; buff cleared.
+    vi.advanceTimersByTime(30 * 60 * 1000);
     r.clearExpiredEffects();
     const a2 = r.getAsteroid('A')!;
     expect(a2.defenseBuff).toBeNull();

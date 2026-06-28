@@ -122,10 +122,10 @@ No source files ported. Only structure, configuration, and the canonical glossar
   - Log strings: `"🎰 GOLD RUSH! Jackpot at ..."` → `"STELLAR STRIKE! Jackpot at ..."` (emoji removed)
   - Removed module-level singleton (`getMineRegistry` / `resetMineRegistry`); construct directly with `{ asteroids?, logger? }`
 - **Numerical changes:** (none)
-  - Defense buff: 2-hour immunity, 1-hour drill-power boost at 1.1x — preserved verbatim
+  - Defense buff: 1-hour drill-power boost at 1.1x — preserved verbatim. Immunity window **retuned from BG's 2h to 30m** (env `RAID_IMMUNITY_MIN`, default 30) so asteroids re-enter the raid pool sooner; the 1h boost now outlasts the immunity window.
   - Attack debuff: 0.8x drill-power reduction, 30-minute window — preserved verbatim
   - Stellar Strike yield multiplier: 5.0x on gold-class asteroids — preserved verbatim
-  - Two-stage defense-buff expiry (boost can drop to 1.0 while immunity continues, both must elapse before clearing) — preserved verbatim
+  - Two-stage defense-buff expiry: both windows must elapse before the buff clears. With the 30m/1h retune, immunity lifts first while the boost lingers (previously the boost dropped to 1.0 first while immunity continued).
   - Multiplier composition order (defense boost × attack debuff × syndicate multiplier for drill power; baseRewardMultiplier × Stellar Strike × Solar Flare × syndicate for yield) — preserved verbatim
 - **Architectural changes:**
   - **No hash-pool dependency.** BG's registry consumed `server/pool/difficulty.ts` to dynamically recompute per-asteroid difficulty when miners joined/left. astroid.club doesn't run a Bitcoin-style PoW pool — `difficulty` and `target` stay as informational placeholder fields on `AsteroidState`, but nothing recomputes them. `updateAsteroidDifficulty(id, difficulty, target)` is preserved as a manual setter for future use. The `recalculateMineDifficulty` method was dropped entirely; `getAsteroidTarget` and `getAsteroidTargetTime` accessors were kept (they read from data, not the pool).

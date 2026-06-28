@@ -237,7 +237,35 @@ describe('PostgresGameStore resilience', () => {
     await expect(store.ledger.getAllBalances()).resolves.toEqual(new Map());
     await expect(store.raidVault.set('asteroid-1', 5)).resolves.toBeUndefined();
     await expect(store.raidVault.getAll()).resolves.toEqual(new Map());
+    // A read failure is swallowed (empty list); writes are awaited by the admin
+    // endpoint, so those DO propagate (covered below) — not asserted here.
+    await expect(store.compWallets.list()).resolves.toEqual([]);
     await expect(store.close()).resolves.toBeUndefined();
     expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('PostgresGameStore comp wallets', () => {
+  it('lists wallets ordered, upserts on add, and deletes on remove', async () => {
+    const client = fakePg((text) =>
+      text.includes('SELECT wallet FROM comp_wallets') ? [{ wallet: ALICE }, { wallet: BOB }] : [],
+    );
+    const store = new PostgresGameStore({ client, logger: silentLogger });
+
+    expect(await store.compWallets.list()).toEqual([ALICE, BOB]);
+    expect(client.calls[0]!.text).toMatch(/SELECT wallet FROM comp_wallets ORDER BY wallet/i);
+
+    await store.compWallets.add(ALICE, 'team');
+    const insert = client.calls[1]!;
+    expect(insert.text).toMatch(/INSERT INTO comp_wallets/i);
+    expect(insert.text).toMatch(/ON CONFLICT \(wallet\) DO UPDATE/i);
+    expect(insert.params).toEqual([ALICE, 'team']);
+
+    await store.compWallets.add(BOB);
+    expect(client.calls[2]!.params).toEqual([BOB, null]);
+
+    await store.compWallets.remove(ALICE);
+    expect(client.calls[3]!.text).toMatch(/DELETE FROM comp_wallets WHERE wallet = \$1/i);
+    expect(client.calls[3]!.params).toEqual([ALICE]);
   });
 });

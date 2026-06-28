@@ -9,8 +9,9 @@
  *
  *   - a verified wager is recorded as durable liability on booking;
  *   - a winning raider's wager is returned in full (no burn / payout);
- *   - a losing raider's wager nets to zero across burn (90% sink) + the 10%
- *     stake-weighted defender spoils;
+ *   - a losing raider's wager nets to zero across the three-way split
+ *     (40% burn / 40% recirculate / 20% stake-weighted defender spoils), and
+ *     undelivered defender share recirculates when nobody is eligible;
  *   - a voluntary abandon burns the whole wager;
  *   - a legacy (no-escrow) raid never touches the hooks; and
  *   - an escrow raid does NOT also charge the in-game stake (no double-spend).
@@ -166,7 +167,7 @@ describe('GameWorld escrow wiring — settlement at resolution', () => {
     expect(world.betEscrow.hasLockedBets(ATK)).toBe(false);
   });
 
-  it('burns the sink and pays defender spoils that net to the wager on a loss', () => {
+  it('splits a loss three ways (burn / recirculate / defender) that net to the wager', () => {
     stageEscrowRaid({ atkStake: 100, atkPower: 100, defStake: 50_000, defPower: 50_000, wager: 100 });
 
     const results = world.resolveDueRaids([GOLD.id]);
@@ -178,21 +179,24 @@ describe('GameWorld escrow wiring — settlement at resolution', () => {
       wagerId: string;
       returnTo?: unknown;
       burn?: number;
+      recirculate?: number;
       defenderPayouts?: Array<{ wallet: string; amount: number }>;
     };
     expect(plan.wagerId).toBe('wager-1');
     expect(plan.returnTo).toBeUndefined();
-    // Defender share is the 10% spoils; the rest is burned; together = wager.
-    expect(plan.defenderPayouts).toEqual([{ wallet: DEF, amount: 10 }]);
-    expect(plan.burn).toBe(90);
-    expect(plan.burn! + plan.defenderPayouts![0]!.amount).toBe(100);
+    // 40% burn / 40% recirculate / 20% defender spoils → together = wager.
+    expect(plan.defenderPayouts).toEqual([{ wallet: DEF, amount: 20 }]);
+    expect(plan.recirculate).toBe(40);
+    expect(plan.burn).toBe(40);
+    expect(plan.burn! + plan.recirculate! + plan.defenderPayouts![0]!.amount).toBe(100);
   });
 
-  it('burns the whole wager when the only defender is itself on a raid (no eligible spoils)', () => {
+  it('recirculates the undelivered defender share when no defender is eligible for spoils', () => {
     // DEF stakes + mines GOLD (so GOLD keeps strong defense), but DEF then
     // launches its OWN raid from GOLD — miners on expedition still contribute
     // defense yet are EXCLUDED from spoils. So the GOLD raid is repelled with
-    // no eligible defender, and the full wager must burn.
+    // no eligible defender: the 20% defender share rolls into recirculation,
+    // and only the 40% burn share is destroyed.
     world.stake(ATK, CARBON.id, 100);
     world.joinAsteroid(ATK, CARBON.id);
     world.reportDrillPower(ATK, 100);
@@ -212,14 +216,17 @@ describe('GameWorld escrow wiring — settlement at resolution', () => {
 
     const results = world.resolveDueRaids([GOLD.id]);
     expect(results[0]!.attackersWon).toBe(false);
-    // No eligible defender → no payout; the full wager is burned.
+    // No eligible defender → no payout; the 20% defender share recirculates
+    // (40% recirc + 20% rolled-in = 60), leaving only the 40% burn.
     expect(onWagerSettle).toHaveBeenCalledTimes(1);
     const plan = onWagerSettle.mock.calls[0]![0] as {
       burn?: number;
+      recirculate?: number;
       defenderPayouts?: unknown;
     };
     expect(plan.defenderPayouts).toBeUndefined();
-    expect(plan.burn).toBe(100);
+    expect(plan.recirculate).toBe(60);
+    expect(plan.burn).toBe(40);
   });
 });
 

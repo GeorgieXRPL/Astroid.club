@@ -177,6 +177,23 @@ export interface RaidVaultStore {
 }
 
 /**
+ * Pluggable persistence for the operator-managed comp/bypass list: wallets
+ * that skip the holder gate (team, partners, comped testers) while the game
+ * stays open to everyone else. The `CompWalletService` keeps an in-memory set
+ * as the runtime source of truth and mirrors mutations here so the list
+ * survives restarts and can be edited live from the admin console. Without a
+ * store the list is in-memory only (env-seeded) and resets on restart.
+ */
+export interface CompWalletStore {
+  /** Read every persisted comped wallet. Used on boot. */
+  list(): Promise<string[]> | string[];
+  /** Persist a comped wallet (idempotent). `note` is optional free text. */
+  add(walletAddress: string, note?: string): Promise<void> | void;
+  /** Remove a comped wallet. */
+  remove(walletAddress: string): Promise<void> | void;
+}
+
+/**
  * Durable, AUDITABLE persistence for pending yield as an append-only
  * event log (the production posture — Postgres/Supabase). Where
  * `PendingYieldStore` mirrors only the *current balance* (a cache, e.g.
@@ -224,8 +241,14 @@ export type EscrowWagerStatus = 'active' | 'settling' | 'settled' | 'failed';
 
 /** One on-chain leg of a wager settlement, with its own completion flag. */
 export interface EscrowSettlementLeg {
-  kind: 'return' | 'burn' | 'payout';
-  /** Recipient wallet for `return` / `payout` legs (omitted for `burn`). */
+  /**
+   * `return` → winner refund, `payout` → defender spoils, `burn` → deflation,
+   * `recirculate` → move forfeited value to the redeemer treasury that backs
+   * other asteroids' raid vaults (the in-game vault credit happens at resolve
+   * time; this leg moves the real tokens).
+   */
+  kind: 'return' | 'burn' | 'payout' | 'recirculate';
+  /** Recipient wallet for `return` / `payout` legs (omitted for `burn` / `recirculate`). */
   wallet?: string;
   amount: number;
   done: boolean;
@@ -257,9 +280,10 @@ export interface EscrowWagerRecord {
 
 /**
  * The resolved outcome of a wager, handed from the game world to the
- * durable escrow manager. Exactly one of `returnTo` / `burn` is the
- * primary disposition; `defenderPayouts` accompanies a `burn` on a
- * defender win (spoils split). All amounts are whole $ASTROID.
+ * durable escrow manager. An attacker win uses `returnTo`; a defender win is
+ * a three-way split across `defenderPayouts` (spoils), `recirculate`
+ * (forfeited value sent to the treasury backing other vaults), and `burn`
+ * (deflation), which together equal the wager. All amounts are whole $ASTROID.
  */
 export interface WagerSettlement {
   wagerId: string;
@@ -267,6 +291,12 @@ export interface WagerSettlement {
   returnTo?: { wallet: string; amount: number };
   /** Defender win / forfeit → burn this amount (the deflationary sink). */
   burn?: number;
+  /**
+   * Defender win → move this much forfeited value to the redeemer treasury
+   * that backs raid vaults (the in-game vault credit is applied separately at
+   * resolve time). Keeps value in play instead of destroying it.
+   */
+  recirculate?: number;
   /** Defender win → stake-weighted spoils paid to these defenders. */
   defenderPayouts?: Array<{ wallet: string; amount: number }>;
 }

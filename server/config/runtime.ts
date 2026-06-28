@@ -67,6 +67,14 @@ export interface AstroidRuntime {
    * preview/test deploy to your own wallets.
    */
   readonly walletAllowlist: readonly string[];
+  /**
+   * Optional comp/bypass list seed. These wallets skip the holder gate (team,
+   * partners, comped testers) while the game stays open to everyone else — it
+   * grants access, never restricts it (the opposite of `walletAllowlist`).
+   * Set via `COMP_WALLETS` (comma-separated base58 pubkeys). The admin console
+   * can add/remove more at runtime; this is just the boot seed.
+   */
+  readonly compWalletSeed: readonly string[];
   /** When set, enables the admin console; when unset, console is disabled. */
   readonly adminSecret: string | undefined;
   /** Optional Redis URL; a current-balance cache for game state when set. */
@@ -98,6 +106,10 @@ export const runtime: AstroidRuntime = (() => {
       .map((s) => s.trim())
       .filter(Boolean),
     walletAllowlist: (process.env.WALLET_ALLOWLIST ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    compWalletSeed: (process.env.COMP_WALLETS ?? '')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),

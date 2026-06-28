@@ -53,6 +53,7 @@ import type {
 import type { GameLogger } from '../game/interfaces.js';
 import type { GameWorld, WorldResult } from '../game/world.js';
 import { ANONYMOUS_WALLET } from '../verification/anti-cheat.js';
+import type { CompWalletService } from '../verification/comp-wallets.js';
 
 import {
   GameMessage,
@@ -158,6 +159,13 @@ export interface AstroidGatewayOptions {
    * escrow outbox rather than silently lost on a chain failure.
    */
   onWagerRefund?: (walletAddress: string, amount: number, wagerId: string) => void;
+  /**
+   * Optional comp/bypass list. Wallets in it skip the holder gate (treated as
+   * `qualified` in `verify_holder`) while everyone else is gated normally —
+   * it grants access, it never restricts it. Operator-managed + live-editable
+   * from the admin console.
+   */
+  compWallets?: CompWalletService;
 }
 
 /** What we stash on `conn.meta`. */
@@ -220,6 +228,7 @@ export class AstroidGateway {
   private readonly log: GameLogger;
   private readonly appName: string;
   private readonly walletAllowlist: ReadonlySet<string>;
+  private readonly compWallets?: CompWalletService;
   private readonly onWagerRefund?: (
     walletAddress: string,
     amount: number,
@@ -238,6 +247,7 @@ export class AstroidGateway {
     this.log = options.logger ?? defaultLogger();
     this.appName = options.appName ?? 'astroid.club';
     this.walletAllowlist = new Set(options.walletAllowlist ?? []);
+    this.compWallets = options.compWallets;
     this.onWagerRefund = options.onWagerRefund;
     if (this.walletAllowlist.size > 0) {
       this.log.warn(
@@ -648,6 +658,16 @@ export class AstroidGateway {
    * generic `error` envelope. Anti-cheat backoff applies.
    */
   private async runHolderVerification(walletAddress: string): Promise<HolderEligibilityData> {
+    // Comp list: wallets the operator has comped past the holder gate (team,
+    // partners, testers). Checked first so they pass regardless of holdings.
+    if (this.compWallets?.has(walletAddress)) {
+      return {
+        eligible: true,
+        reason: 'qualified',
+        walletAddress,
+        message: 'Access granted (comped). Welcome to the Club.',
+      };
+    }
     if (!this.chainOps) {
       return {
         eligible: true,

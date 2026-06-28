@@ -73,6 +73,11 @@ function makeChain(opts: { failFirst?: number } = {}) {
         calls.push({ op: 'burn', amount, wagerId });
         return `burn-${wagerId}`;
       }),
+      recirculateToTreasury: vi.fn(async (amount: number, wagerId: string) => {
+        maybeFail();
+        calls.push({ op: 'recirculate', amount, wagerId });
+        return `recirc-${wagerId}`;
+      }),
     },
   };
 }
@@ -119,6 +124,22 @@ describe('EscrowManager — recording + settlement', () => {
     expect(chain.chain.payDefender).toHaveBeenCalledWith('DEF', 10, 'w2');
     expect(chain.chain.burnWager).toHaveBeenCalledWith(90, 'w2');
     expect(store.map.has('w2')).toBe(false);
+  });
+
+  it('runs a 3-way loss split in order: payout → recirculate → burn', async () => {
+    await mgr.recordBooked({ wagerId: 'w4', wallet: 'ATK', amount: 100, expeditionId: 'e4' });
+    await mgr.settle({
+      wagerId: 'w4',
+      burn: 40,
+      recirculate: 40,
+      defenderPayouts: [{ wallet: 'DEF', amount: 20 }],
+    });
+
+    expect(chain.calls.map((c) => c.op)).toEqual(['payout', 'recirculate', 'burn']);
+    expect(chain.chain.payDefender).toHaveBeenCalledWith('DEF', 20, 'w4');
+    expect(chain.chain.recirculateToTreasury).toHaveBeenCalledWith(40, 'w4');
+    expect(chain.chain.burnWager).toHaveBeenCalledWith(40, 'w4');
+    expect(store.map.has('w4')).toBe(false); // fully settled
   });
 
   it('refund() returns the deposit to the raider', async () => {
