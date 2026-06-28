@@ -698,6 +698,17 @@ function ConnectedArena({
     if (snap?.homeStationAsteroidId) onSelect(snap.homeStationAsteroidId);
   }, [snap?.homeStationAsteroidId, onSelect]);
 
+  // Detect a wallet/session divergence: the WS session authenticated as one
+  // wallet, but the browser's active signing wallet (Privy `wallets[0]`) is now
+  // a different one. Signing in that state fails on-chain (error #5663015) and
+  // can strand a claim's bridged Creds, so warn up-front and tell the user to
+  // switch back to the wallet they logged in with.
+  const signerWallet = wallet.source?.publicKey ?? null;
+  const walletMismatch =
+    signerWallet && signerWallet !== session.walletAddress
+      ? { session: session.walletAddress, signer: signerWallet }
+      : null;
+
   const renderIdentity = () => (
     <IdentityPanel
       busy={busy}
@@ -715,6 +726,7 @@ function ConnectedArena({
       snapshot={snap}
       stakeAmount={stakeAmount}
       stats={stats}
+      walletMismatch={walletMismatch}
     />
   );
 
@@ -983,6 +995,7 @@ function IdentityPanel({
   setStakeAmount,
   pendingRedeem,
   sharing,
+  walletMismatch,
 }: {
   snapshot: ConnectSnapshot | null;
   stats: NetworkStatsSnapshot | null;
@@ -999,6 +1012,7 @@ function IdentityPanel({
   setStakeAmount: (n: number) => void;
   pendingRedeem: number;
   sharing: boolean;
+  walletMismatch: { session: string; signer: string } | null;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   // Default to collapsed on small screens to reclaim arena space; expand on
@@ -1033,6 +1047,18 @@ function IdentityPanel({
         </button>
       </div>
       <div className="font-mono text-[11px] text-white/85">{short(snapshot.walletAddress)}</div>
+      {walletMismatch && (
+        <div className="mt-2 rounded-md border border-ember/50 bg-ember/10 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-ember">
+          <span className="font-semibold uppercase tracking-[0.16em]">Wrong wallet</span>
+          <p className="mt-1 text-ember/90">
+            You&rsquo;re signed in as{' '}
+            <span className="text-white/90">{short(walletMismatch.session)}</span> but your wallet is
+            set to sign as <span className="text-white/90">{short(walletMismatch.signer)}</span>.
+            Switch back to <span className="text-white/90">{short(walletMismatch.session)}</span>{' '}
+            before staking or claiming, or sign out and reconnect.
+          </p>
+        </div>
+      )}
       {collapsed && canClaim && (
         <div className="mt-1 font-mono text-[11px] font-semibold text-emerald-300">
           {fmt(snapshot.pendingYield)} claimable

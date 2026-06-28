@@ -48,6 +48,50 @@ export class StakingUnavailableError extends Error {
 }
 
 /**
+ * Thrown when the wallet about to SIGN differs from the wallet the live
+ * session was authenticated as. Every on-chain action the gateway builds is
+ * scoped to the authenticated wallet (`session.walletAddress`) — it's the fee
+ * payer + token authority baked into the transaction. If the browser then
+ * signs with a different wallet (e.g. the user connected/switched wallets in
+ * Privy after connecting, so `wallets[0]` changed under the session) the
+ * signature is for the wrong key and Solana rejects it with
+ * "Attempted to sign a transaction with an address that is not a signer"
+ * (error #5663015). Worse, for a claim the credits would already have bridged
+ * to the SESSION wallet, stranding them under a wallet the user isn't signing
+ * with. Catching this BEFORE any build/bridge keeps funds safe and tells the
+ * user exactly what to do.
+ */
+export class WalletMismatchError extends Error {
+  constructor(
+    public readonly sessionWallet: string,
+    public readonly signerWallet: string,
+  ) {
+    super(
+      `Your game session is signed in as ${shortAddr(sessionWallet)}, but your wallet is ` +
+        `currently set to sign as ${shortAddr(signerWallet)}. Switch your wallet back to ` +
+        `${shortAddr(sessionWallet)} (the wallet you logged in with), then try again — or sign ` +
+        `out and reconnect with the wallet you want to play as. No funds were moved.`,
+    );
+    this.name = 'WalletMismatchError';
+  }
+}
+
+function shortAddr(s: string): string {
+  return s.length <= 12 ? s : `${s.slice(0, 4)}…${s.slice(-4)}`;
+}
+
+/**
+ * Guard that the wallet that will sign matches the authenticated session
+ * wallet. Throws {@link WalletMismatchError} if they differ. Call this at the
+ * top of every signing flow, before building or bridging anything.
+ */
+function assertSignerMatchesSession(session: Session, source: WalletSource): void {
+  if (source.publicKey && source.publicKey !== session.walletAddress) {
+    throw new WalletMismatchError(session.walletAddress, source.publicKey);
+  }
+}
+
+/**
  * How long to wait for the gateway's `verify_stake_tx` reply. Verification
  * does a full on-chain `confirmTransaction` + `getTransaction` (memo check)
  * + a stake-tier reconcile, which on mainnet routinely outlasts the default
@@ -80,6 +124,7 @@ export async function runStakeAction(
       'This wallet cannot submit on-chain transactions. Connect a Solana wallet (or set NEXT_PUBLIC_SOLANA_RPC_URL in dev mode).',
     );
   }
+  assertSignerMatchesSession(session, source);
 
   const build = await buildFor(session, kind, amount);
   const signable: SignableTransaction = {
@@ -193,6 +238,10 @@ export async function runClaimToWallet(
       'This wallet cannot submit on-chain transactions. Connect a Solana wallet (or set NEXT_PUBLIC_SOLANA_RPC_URL in dev mode).',
     );
   }
+  // Guard BEFORE the bridge: if the signer differs from the session wallet,
+  // bridging would strand the Astroid Creds under a wallet the user isn't
+  // signing with. Fail early so nothing moves.
+  assertSignerMatchesSession(session, source);
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, amount, message: 'No claimable rewards.' };
   }
@@ -274,6 +323,7 @@ export async function runWagerRaid(
       'Connect a Solana wallet to place an on-chain wager (or set NEXT_PUBLIC_SOLANA_RPC_URL in dev mode).',
     );
   }
+  assertSignerMatchesSession(session, source);
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, message: 'Wager must be greater than 0.' };
   }
@@ -319,6 +369,7 @@ export async function runRedeemIou(
       'This wallet cannot submit on-chain transactions. Connect a Solana wallet (or set NEXT_PUBLIC_SOLANA_RPC_URL in dev mode).',
     );
   }
+  assertSignerMatchesSession(session, source);
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, amount, message: 'Nothing to redeem.' };
   }
