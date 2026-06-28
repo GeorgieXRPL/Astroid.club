@@ -566,6 +566,10 @@ export class AstroidGateway {
         });
         return;
       }
+      case 'creds_balance': {
+        await this.forwardQuery(conn, requestId, (ops, wallet) => ops.getCredsBalance(wallet));
+        return;
+      }
       case 'stake_info': {
         await this.forwardQuery(conn, requestId, async (ops, wallet) => {
           const result = await ops.getStakeInfo(wallet);

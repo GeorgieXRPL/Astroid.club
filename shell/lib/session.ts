@@ -458,6 +458,15 @@ export class Session {
     return this.send<UserStakeInfo>({ type: 'stake_info' }, options);
   }
 
+  /**
+   * Read the authenticated wallet's on-chain Astroid Creds (bridged IOU)
+   * balance in UI units. Used to surface a "Redeem Creds → $ASTROID" action for
+   * credits that were bridged but not yet redeemed.
+   */
+  getCredsBalance(options: { timeoutMs?: number } = {}): Promise<number> {
+    return this.send<number>({ type: 'creds_balance' }, options);
+  }
+
   /** Close the socket. Idempotent. */
   close(): void {
     if (this.state === 'closed') return;

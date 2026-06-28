@@ -283,6 +283,7 @@ describe('ChainOps with chainEnabled=true and full impls', () => {
         lastStakeTime: null,
         minerPDA: 'miner-pda',
       })),
+      getCredsBalance: vi.fn(async () => 0),
     };
   }
 
@@ -497,6 +498,7 @@ describe('ChainOps Quarry staking ops', () => {
         lastStakeTime: null,
         minerPDA: 'miner-pda',
       })),
+      getCredsBalance: vi.fn(async () => 0),
     };
   }
 });

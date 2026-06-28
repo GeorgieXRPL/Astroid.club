@@ -217,6 +217,26 @@ export class RedeemerService {
   }
 
   /**
+   * Read `walletAddress`'s on-chain Astroid Creds (IOU) balance in UI units.
+   * Returns 0 when the wallet has no Astroid Creds account yet. Drives the
+   * one-click "Redeem Creds" affordance for credits that were bridged but not
+   * yet redeemed (e.g. a claim whose redeem step didn't finish, or a session
+   * that reloaded before redeeming).
+   */
+  async credsBalance(walletAddress: string): Promise<number> {
+    const splToken = loadSplToken();
+    try {
+      const owner = new PublicKey(walletAddress);
+      const ata = await splToken.getAssociatedTokenAddress(this.iouMint, owner);
+      const account = await splToken.getAccount(this.connection, ata);
+      return Number(account.amount) / Math.pow(10, this.config.iouDecimals);
+    } catch {
+      // No ATA / not found → nothing redeemable.
+      return 0;
+    }
+  }
+
+  /**
    * Bridge: transfer `iouAmount` Astroid Creds (UI units) from the treasury
    * to `walletAddress`. Server-signed + confirmed. The CALLER must have
    * already debited the player's in-game credits — this only moves the

@@ -336,6 +336,7 @@ async function main(): Promise<void> {
       chainImpls.buildRedeemTx = (wallet, amount) => redeemer.buildRedeemSwap(wallet, amount);
       chainImpls.coSignAndSubmitRedeem = (wallet, args) =>
         redeemer.coSignAndSubmitRedeem(wallet, args);
+      chainImpls.getCredsBalance = (wallet) => redeemer.credsBalance(wallet);
       console.info(
         `[astroid-club] Astroid Creds bridge + atomic redeemer wired (treasury=` +
           `${redeemer.treasuryAddress.slice(0, 8)}…, rate=${redeemerConfig.redeemRate} ` +

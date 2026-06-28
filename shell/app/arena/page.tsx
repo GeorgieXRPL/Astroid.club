@@ -198,6 +198,11 @@ function ConnectedArena({
   // didn't finish (e.g. the player was too slow to sign). Drives the
   // "Finish claim" recovery button so those rewards aren't stranded.
   const [pendingRedeem, setPendingRedeem] = useState(0);
+  // The wallet's on-chain Astroid Creds balance (credits already bridged but
+  // not yet redeemed to $ASTROID). Read from the gateway so a persistent
+  // "Redeem Creds" button can recover them across sessions — not just the
+  // in-session "Finish claim". 0 when chain is off or the read fails.
+  const [walletCreds, setWalletCreds] = useState(0);
   // Shareable-card state: a generate-in-progress flag, plus the most recent
   // raid outcome attributable to this client (so the share button has data).
   const [sharing, setSharing] = useState(false);
@@ -239,6 +244,21 @@ function ConnectedArena({
     const id = setInterval(refresh, POLL_MS);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Best-effort read of the wallet's bridged-but-unredeemed Astroid Creds.
+  // Kept OUT of the 15s poll (it fans out to an RPC) — fetched on mount and
+  // re-fetched after claim/redeem actions, which is when it actually changes.
+  const refreshCreds = useCallback(async () => {
+    try {
+      setWalletCreds(await session.getCredsBalance());
+    } catch {
+      /* chain disabled / transient — leave the last known value */
+    }
+  }, [session]);
+
+  useEffect(() => {
+    void refreshCreds();
+  }, [refreshCreds]);
 
   // Live raid feed: the server pushes raid_started / raid_resolved to every
   // client. Surface outcomes in a small ticker and refresh stats so treasury /
@@ -482,6 +502,7 @@ function ConnectedArena({
         if (result.bridgedOnly) setPendingRedeem(amount);
       }
       await refresh();
+      void refreshCreds();
     } catch (err) {
       if (err instanceof StakingUnavailableError) {
         setError({ code: 'staking_unavailable', message: err.message });
@@ -493,7 +514,7 @@ function ConnectedArena({
     } finally {
       setBusy(null);
     }
-  }, [session, wallet.source, snap, refresh]);
+  }, [session, wallet.source, snap, refresh, refreshCreds]);
 
   // Recovery for a claim that stopped at the bridge step: finish the redeem
   // swap for the Astroid Creds now sitting in the wallet.
@@ -511,6 +532,7 @@ function ConnectedArena({
         setError({ code: 'redeem_incomplete', message: result.message });
       }
       await refresh();
+      void refreshCreds();
     } catch (err) {
       if (err instanceof StakingUnavailableError) {
         setError({ code: 'staking_unavailable', message: err.message });
@@ -522,7 +544,40 @@ function ConnectedArena({
     } finally {
       setBusy(null);
     }
-  }, [session, wallet.source, pendingRedeem, refresh]);
+  }, [session, wallet.source, pendingRedeem, refresh, refreshCreds]);
+
+  // Persistent recovery: redeem the Astroid Creds currently sitting in the
+  // wallet (bridged but never redeemed — e.g. a claim that half-finished in a
+  // previous session, so `pendingRedeem` is gone but the tokens remain). Reads
+  // the live on-chain balance so this works across reloads, unlike the
+  // in-session "Finish claim".
+  const onRedeemCreds = useCallback(async () => {
+    if (!canStake(wallet.source) || !wallet.source || walletCreds <= 0) return;
+    setBusy('claim');
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await runRedeemIou(session, wallet.source as WalletSource, walletCreds);
+      if (result.ok) {
+        setNotice(result.message);
+        setPendingRedeem(0);
+      } else {
+        setError({ code: 'redeem_incomplete', message: result.message });
+      }
+      await refresh();
+      void refreshCreds();
+    } catch (err) {
+      if (err instanceof StakingUnavailableError) {
+        setError({ code: 'staking_unavailable', message: err.message });
+      } else if (err instanceof SessionError) {
+        setError({ code: err.code, message: err.message });
+      } else if (err instanceof Error) {
+        setError({ code: 'unknown', message: err.message });
+      }
+    } finally {
+      setBusy(null);
+    }
+  }, [session, wallet.source, walletCreds, refresh, refreshCreds]);
 
   const onSelect = useCallback((id: string) => {
     setSelectedId(id);
@@ -717,10 +772,12 @@ function ConnectedArena({
       onDismissNotice={() => setNotice(null)}
       onFinishRedeem={onFinishRedeem}
       onGoHome={onGoHome}
+      onRedeemCreds={onRedeemCreds}
       onShareRun={onShareRun}
       onStake={onStake}
       pendingRedeem={pendingRedeem}
       resolveName={resolveName}
+      walletCreds={walletCreds}
       setStakeAmount={setStakeAmount}
       sharing={sharing}
       snapshot={snap}
@@ -988,6 +1045,7 @@ function IdentityPanel({
   onDismissNotice,
   onFinishRedeem,
   onGoHome,
+  onRedeemCreds,
   onShareRun,
   onStake,
   resolveName,
@@ -995,6 +1053,7 @@ function IdentityPanel({
   setStakeAmount,
   pendingRedeem,
   sharing,
+  walletCreds,
   walletMismatch,
 }: {
   snapshot: ConnectSnapshot | null;
@@ -1005,6 +1064,7 @@ function IdentityPanel({
   onDismissNotice: () => void;
   onFinishRedeem: () => void;
   onGoHome: () => void;
+  onRedeemCreds: () => void;
   onShareRun: () => void;
   onStake: () => void;
   resolveName: (id: string | null) => string;
@@ -1012,6 +1072,7 @@ function IdentityPanel({
   setStakeAmount: (n: number) => void;
   pendingRedeem: number;
   sharing: boolean;
+  walletCreds: number;
   walletMismatch: { session: string; signer: string } | null;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -1240,6 +1301,17 @@ function IdentityPanel({
           type="button"
         >
           {claiming ? 'Finishing…' : `Finish claim ${fmt(pendingRedeem)} → $ASTROID`}
+        </button>
+      )}
+      {pendingRedeem <= 0 && walletCreds > 0 && (
+        <button
+          className="mt-2 w-full rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-amber-300 transition hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={claiming}
+          onClick={onRedeemCreds}
+          title="You hold Astroid Creds that were bridged but not yet redeemed. Convert them to $ASTROID now."
+          type="button"
+        >
+          {claiming ? 'Redeeming…' : `Redeem ${fmt(walletCreds)} Creds → $ASTROID`}
         </button>
       )}
       <button

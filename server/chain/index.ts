@@ -240,6 +240,8 @@ export interface ChainOpsImplementations {
     expectedAmount: number,
   ): Promise<StakeVerification>;
   getStakeInfo(walletAddress: string): Promise<UserStakeInfo>;
+  /** Read a wallet's on-chain Astroid Creds (bridged IOU) balance, UI units. */
+  getCredsBalance(walletAddress: string): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -560,6 +562,18 @@ export class ChainOps {
     if (!this.chainEnabled) return disabled('getStakeInfo');
     const impl = this.impls.getStakeInfo;
     if (!impl) throw new ChainOpNotImplementedError('getStakeInfo', 'chain_quarry_staking');
+    return { ok: true, disabled: false, data: await impl(walletAddress) };
+  }
+
+  /**
+   * Read a wallet's on-chain Astroid Creds (bridged IOU) balance, UI units.
+   * Lets the client surface a "Redeem Creds" action for credits sitting in the
+   * wallet from a bridge whose redeem step hasn't completed yet.
+   */
+  async getCredsBalance(walletAddress: string): Promise<ChainQueryResult<number>> {
+    if (!this.chainEnabled) return disabled('getCredsBalance');
+    const impl = this.impls.getCredsBalance;
+    if (!impl) throw new ChainOpNotImplementedError('getCredsBalance', 'chain_iou_bridge');
     return { ok: true, disabled: false, data: await impl(walletAddress) };
   }
 

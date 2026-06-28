@@ -184,6 +184,17 @@ export const StakeInfoMessage = z.object({
   requestId: RequestId,
 });
 
+/**
+ * Read the authenticated wallet's on-chain Astroid Creds (bridged IOU)
+ * balance. Drives the "Redeem Creds → $ASTROID" affordance for credits that
+ * were bridged but not yet redeemed. Like `stake_info` this fans out to an RPC,
+ * so it is NOT in the readonly rate-limit exemption set.
+ */
+export const CredsBalanceMessage = z.object({
+  type: z.literal('creds_balance'),
+  requestId: RequestId,
+});
+
 // ---------- Expedition / raid actions ----------
 
 export const StartExpeditionMessage = z.object({
@@ -302,6 +313,7 @@ export const GameMessage = z.discriminatedUnion('type', [
   BridgeIouMessage,
   VerifyStakeTxMessage,
   StakeInfoMessage,
+  CredsBalanceMessage,
   StartExpeditionMessage,
   LeaveExpeditionMessage,
   BuildWagerDepositMessage,
@@ -333,6 +345,7 @@ export const POST_AUTH_TYPES: ReadonlySet<GameMessageType> = new Set<GameMessage
   'bridge_iou',
   'verify_stake_tx',
   'stake_info',
+  'creds_balance',
   'start_expedition',
   'leave_expedition',
   'build_wager_deposit',
