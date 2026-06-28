@@ -955,13 +955,14 @@ function OnChainStakingPanel({
   }, [refresh]);
 
   const run = useCallback(
-    async (kind: StakeActionKind) => {
+    async (kind: StakeActionKind, amountOverride?: number) => {
       if (!wallet.source) return;
+      const amt = amountOverride ?? amount;
       const label = `${kind}_tx`;
-      append('sent', label, kind === 'claim' ? undefined : `amount=${amount}`);
+      append('sent', label, kind === 'claim' ? undefined : `amount=${amt}`);
       setBusy(kind);
       try {
-        const result = await runStakeAction(session, wallet.source as WalletSource, kind, amount);
+        const result = await runStakeAction(session, wallet.source as WalletSource, kind, amt);
         append(result.ok ? 'ok' : 'err', label, result.signature ?? result.message);
         if (result.signature) append('event', label, result.message);
         await refresh();
@@ -1048,6 +1049,15 @@ function OnChainStakingPanel({
             type="button"
           >
             {busy === 'unstake' ? 'Unstaking…' : 'Unstake'}
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={!available || busy !== null || (info?.stakedAmount ?? 0) <= 0}
+            onClick={() => run('unstake', info?.stakedAmount ?? 0)}
+            title="Unstake your entire staked $ASTROID position"
+            type="button"
+          >
+            {busy === 'unstake' ? 'Unstaking…' : `Unstake all${info?.stakedAmount ? ` (${fmt(info.stakedAmount)})` : ''}`}
           </button>
           <button
             className="btn-ghost"

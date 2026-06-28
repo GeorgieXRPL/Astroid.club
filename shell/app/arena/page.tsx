@@ -683,6 +683,21 @@ function ConnectedArena({
 
   // Single-source the HUD panels as render closures so the mobile (flow) and
   // desktop (draggable) layers stay in sync without duplicating prop lists.
+  // Map an asteroid id to its human-readable name (falls back to the raw id,
+  // then a dash). Used so the HUD shows "Where you're based" by name rather
+  // than the opaque asteroid id.
+  const resolveName = useCallback(
+    (id: string | null) => (id && snap?.asteroids.find((a) => a.id === id)?.name) || id || '-',
+    [snap?.asteroids],
+  );
+
+  // One-tap "return home": select the home asteroid so the scene highlights it
+  // and its action panel opens (the existing navigation primitive — the rocks
+  // orbit, so there's no fixed point to fly the camera to).
+  const onGoHome = useCallback(() => {
+    if (snap?.homeStationAsteroidId) onSelect(snap.homeStationAsteroidId);
+  }, [snap?.homeStationAsteroidId, onSelect]);
+
   const renderIdentity = () => (
     <IdentityPanel
       busy={busy}
@@ -690,9 +705,11 @@ function ConnectedArena({
       onClaim={onClaim}
       onDismissNotice={() => setNotice(null)}
       onFinishRedeem={onFinishRedeem}
+      onGoHome={onGoHome}
       onShareRun={onShareRun}
       onStake={onStake}
       pendingRedeem={pendingRedeem}
+      resolveName={resolveName}
       setStakeAmount={setStakeAmount}
       sharing={sharing}
       snapshot={snap}
@@ -958,8 +975,10 @@ function IdentityPanel({
   onClaim,
   onDismissNotice,
   onFinishRedeem,
+  onGoHome,
   onShareRun,
   onStake,
+  resolveName,
   stakeAmount,
   setStakeAmount,
   pendingRedeem,
@@ -972,8 +991,10 @@ function IdentityPanel({
   onClaim: () => void;
   onDismissNotice: () => void;
   onFinishRedeem: () => void;
+  onGoHome: () => void;
   onShareRun: () => void;
   onStake: () => void;
+  resolveName: (id: string | null) => string;
   stakeAmount: number;
   setStakeAmount: (n: number) => void;
   pendingRedeem: number;
@@ -1023,19 +1044,72 @@ function IdentityPanel({
       {collapsed ? null : (
         <>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
-        <Pill label="Home" value={snapshot.homeStationAsteroidId ?? '-'} />
+        <Pill
+          label="Home"
+          value={snapshot.homeStationAsteroidId ? resolveName(snapshot.homeStationAsteroidId) : '—'}
+        />
         <Pill
           accent={!!snapshot.activeAsteroidId}
           label="Mining"
-          value={snapshot.activeAsteroidId ?? '-'}
+          value={snapshot.activeAsteroidId ? resolveName(snapshot.activeAsteroidId) : '—'}
         />
-        <Pill label="Stake" value={fmt(snapshot.totalStake)} />
         {snapshot.tier && (
           <Pill
             accent
             label="Tier"
             value={`${snapshot.tier.tierName} ${snapshot.tier.drillPowerMultiplier}×`}
           />
+        )}
+      </div>
+
+      {/* Where your stake lives. Quarry staking is a single GLOBAL drill stake
+          (not locked to one rock) — it boosts your drill at whichever asteroid
+          you mine. Surface the home base + active mine by name, with one-tap
+          navigation back home, so it's always clear where you're based. */}
+      <div className="mt-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
+        <div className="mb-1 flex items-baseline justify-between">
+          <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
+            Drill stake · global
+          </span>
+          <span className="font-mono text-sm font-semibold text-cosmos">
+            {fmt(snapshot.totalStake)}
+          </span>
+        </div>
+        {snapshot.homeStationAsteroidId ? (
+          <>
+            <div className="flex items-baseline justify-between font-mono text-[10px]">
+              <span className="uppercase tracking-[0.14em] text-white/45">Home base</span>
+              <span className="text-white/85">{resolveName(snapshot.homeStationAsteroidId)}</span>
+            </div>
+            <div className="mt-1 flex items-baseline justify-between font-mono text-[10px]">
+              <span className="uppercase tracking-[0.14em] text-white/45">Mining now</span>
+              <span className={snapshot.activeAsteroidId ? 'text-emerald-300' : 'text-white/40'}>
+                {snapshot.activeAsteroidId
+                  ? resolveName(snapshot.activeAsteroidId)
+                  : 'not deployed'}
+              </span>
+            </div>
+            <button
+              className="mt-2 w-full rounded-md border border-sky-400/40 bg-sky-400/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-sky-300 transition hover:bg-sky-400/15"
+              onClick={onGoHome}
+              title="Highlight your home base and open its panel"
+              type="button"
+            >
+              Return to home base
+            </button>
+            <p className="mt-1.5 border-t border-white/10 pt-1.5 font-mono text-[9px] leading-relaxed text-white/40">
+              Your stake is one global drill stake — it powers your drill at whichever asteroid
+              you&rsquo;re mining, not locked to a single rock. Your home base is remembered between
+              sessions.
+            </p>
+          </>
+        ) : (
+          <p className="font-mono text-[9px] leading-relaxed text-white/45">
+            No home base yet. Open an asteroid and tap{' '}
+            <span className="text-white/80">Set as home</span> to anchor your operation — your{' '}
+            <span className="text-cosmos">{fmt(snapshot.totalStake)}</span> stake then powers your
+            drill wherever you mine.
+          </p>
         )}
       </div>
       {snapshot.tier &&
@@ -1092,8 +1166,8 @@ function IdentityPanel({
         </div>
         <div className="mt-1.5 border-t border-white/10 pt-1.5 font-mono text-[9px] leading-relaxed text-white/40">
           Deflecting meteors spends credits (your claimable balance). Raid wagers escrow real
-          $ASTROID from your connected wallet. A win returns your wager, a loss burns 90% and pays
-          10% to the defenders.
+          $ASTROID from your connected wallet. A win returns your wager; a loss burns 40%,
+          recirculates 40% to other asteroids&rsquo; vaults, and pays 20% to the defenders.
         </div>
       </div>
 
@@ -1466,8 +1540,8 @@ function AsteroidActionPanel({
             <p className="self-end font-mono text-[10px] leading-relaxed text-white/45">
               Beat {fmt(stats?.defensePower ?? 0)} defense to carry off up to{' '}
               {fmt(stats?.stealableYield ?? 0)} $ASTROID from this asteroid&rsquo;s treasury. A wager
-              escrows real $ASTROID from your wallet, returned on a win, 90% burned (10% to
-              defenders) on a loss.
+              escrows real $ASTROID from your wallet, returned on a win; on a loss 40% is burned, 40%
+              recirculates to other vaults, and 20% pays the defenders.
             </p>
           </div>
         )}
