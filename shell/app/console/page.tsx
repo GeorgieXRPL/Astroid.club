@@ -930,6 +930,7 @@ function OnChainStakingPanel({
 }) {
   const wallet = useWalletSource();
   const [info, setInfo] = useState<UserStakeInfo | null>(null);
+  const [walletCreds, setWalletCreds] = useState(0);
   const [amount, setAmount] = useState<number>(100);
   const [busy, setBusy] = useState<StakeActionKind | null>(null);
   const [chainOff, setChainOff] = useState(false);
@@ -947,6 +948,13 @@ function OnChainStakingPanel({
         else append('err', 'stake_info', `${err.code}: ${err.message}`);
       }
       setInfo(null);
+    }
+    // Wallet's bridged-but-unredeemed Astroid Creds — drives "Redeem all".
+    // Best-effort: a failure (chain off / transient) just leaves it at 0.
+    try {
+      setWalletCreds(await session.getCredsBalance());
+    } catch {
+      setWalletCreds(0);
     }
   }, [session, append]);
 
@@ -1012,8 +1020,9 @@ function OnChainStakingPanel({
         </p>
       )}
 
-      <div className="mb-5 grid gap-4 sm:grid-cols-3">
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Staked $ASTROID" mono accent value={fmt(info?.stakedAmount ?? 0)} />
+        <Stat label="Redeemable Creds (wallet)" mono accent value={fmt(walletCreds)} />
         <Stat label="Staking rewards (Creds)" mono value={fmt(info?.pendingRewards ?? 0)} />
         <Stat
           label="Last stake"
@@ -1072,10 +1081,19 @@ function OnChainStakingPanel({
             className="btn-ghost"
             disabled={!available || busy !== null || amount <= 0}
             onClick={() => run('redeem')}
-            title="Convert Astroid Creds in your wallet to $ASTROID (1:1)"
+            title="Convert the entered amount of Astroid Creds in your wallet to $ASTROID (1:1)"
             type="button"
           >
             {busy === 'redeem' ? 'Redeeming…' : 'Redeem Creds → $ASTROID'}
+          </button>
+          <button
+            className="btn-ghost"
+            disabled={!available || busy !== null || walletCreds <= 0}
+            onClick={() => run('redeem', walletCreds)}
+            title="Convert ALL Astroid Creds in your wallet to $ASTROID (1:1)"
+            type="button"
+          >
+            {busy === 'redeem' ? 'Redeeming…' : `Redeem all${walletCreds > 0 ? ` (${fmt(walletCreds)})` : ''} → $ASTROID`}
           </button>
         </div>
       </div>
