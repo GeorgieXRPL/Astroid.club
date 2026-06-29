@@ -12,7 +12,13 @@
  * never echo the supplied key material.
  */
 
-import { Keypair, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
+import {
+  ComputeBudgetProgram,
+  Keypair,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction,
+} from '@solana/web3.js';
 import type { Connection, PublicKey } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -272,6 +278,85 @@ describe('RedeemerService.coSignAndSubmitRedeem (wallet-first co-sign gate)', ()
     // The broadcast tx must carry BOTH signatures (user + treasury).
     const submitted = Transaction.from(sent[0]!);
     expect(submitted.verifySignatures()).toBe(true);
+  });
+
+  it('tolerates a wallet-prepended ComputeBudget (priority-fee) instruction', async () => {
+    // Real wallets (e.g. Phantom with priority fees on) add ComputeBudget
+    // instructions when signing. These reference no accounts and can't move
+    // funds, so the co-sign gate must accept them rather than fail with
+    // "does not match the redeem we issued".
+    const user = Keypair.generate();
+    const treasury = Keypair.generate();
+    const { conn, sent } = fakeConnection('sig-cb'.padEnd(64, '1'));
+    const service = makeService(treasury, conn);
+
+    const built = makeSwap(user.publicKey, treasury.publicKey);
+    const builtTransaction = built
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString('base64');
+
+    // The wallet rebuilds the tx with a priority fee prepended, keeping our
+    // blockhash + original instruction, then signs it.
+    const withFee = new Transaction();
+    withFee.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
+    withFee.add(built.instructions[0]!);
+    withFee.feePayer = user.publicKey;
+    withFee.recentBlockhash = BLOCKHASH;
+    withFee.partialSign(user);
+    const signedTransaction = withFee
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString('base64');
+
+    const signature = await service.coSignAndSubmitRedeem(user.publicKey.toBase58(), {
+      builtTransaction,
+      signedTransaction,
+      blockhash: BLOCKHASH,
+      lastValidBlockHeight: 1000,
+    });
+
+    expect(signature).toBe('sig-cb'.padEnd(64, '1'));
+    expect(sent).toHaveLength(1);
+    const submitted = Transaction.from(sent[0]!);
+    expect(submitted.verifySignatures()).toBe(true);
+    expect(submitted.instructions).toHaveLength(2);
+  });
+
+  it('refuses an extra NON-ComputeBudget instruction (treasury-signature abuse)', async () => {
+    const user = Keypair.generate();
+    const treasury = Keypair.generate();
+    const service = makeService(treasury, fakeConnection().conn);
+
+    const built = makeSwap(user.publicKey, treasury.publicKey);
+    const builtTransaction = built
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString('base64');
+
+    // The client smuggles in an extra instruction that would also be covered
+    // by the treasury signature — must be rejected before the treasury signs.
+    const tampered = new Transaction();
+    tampered.add(built.instructions[0]!);
+    tampered.add(
+      new TransactionInstruction({
+        programId: SystemProgram.programId,
+        keys: [{ pubkey: treasury.publicKey, isSigner: true, isWritable: true }],
+        data: Buffer.from([7, 7, 7, 7]),
+      }),
+    );
+    tampered.feePayer = user.publicKey;
+    tampered.recentBlockhash = BLOCKHASH;
+    tampered.partialSign(user);
+    const signedTransaction = tampered
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString('base64');
+
+    await expect(
+      service.coSignAndSubmitRedeem(user.publicKey.toBase58(), {
+        builtTransaction,
+        signedTransaction,
+        blockhash: BLOCKHASH,
+        lastValidBlockHeight: 1000,
+      }),
+    ).rejects.toThrow(/does not match/i);
   });
 
   it('refuses to co-sign a tx whose message does not match the one issued', async () => {

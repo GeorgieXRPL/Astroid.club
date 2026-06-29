@@ -429,13 +429,14 @@ export class RedeemerService {
    * broadcast it.
    *
    * SECURITY — this is the gate that makes co-signing a client-submitted
-   * transaction safe: the submitted transaction's MESSAGE (instructions,
-   * accounts, fee payer, blockhash) must be byte-identical to the one we
-   * built, and the wallet's own signature over it must already be valid.
-   * If a malicious client swapped in a different transaction (e.g. one that
-   * drains the treasury), the message won't match and we refuse to sign. The
-   * `built` transaction is supplied by the gateway from its own cache of what
-   * it issued — never reconstructed from client input.
+   * transaction safe. The fee payer must be the authenticated wallet, the
+   * blockhash must be the one we issued, and the submission must contain
+   * EXACTLY the instructions we built (in order) plus, at most, benign
+   * ComputeBudget instructions (which real wallets add for priority fees and
+   * which reference no accounts). Any other instruction — anything that could
+   * abuse the treasury's signature to move funds — is rejected before the
+   * treasury signs. The `built` transaction is supplied by the gateway from
+   * its own cache of what it issued — never reconstructed from client input.
    *
    * Resolves with the confirmed base58 signature; throws a sanitized error
    * on any mismatch / failure (nothing is lost — if it didn't land, the
@@ -456,18 +457,62 @@ export class RedeemerService {
       const built = Transaction.from(Buffer.from(args.builtTransaction, 'base64'));
       const signed = Transaction.from(Buffer.from(args.signedTransaction, 'base64'));
 
-      // The only thing the client is allowed to have changed is ADDING
-      // signatures. The message must be exactly what we issued.
-      const builtMessage = built.serializeMessage();
-      const signedMessage = signed.serializeMessage();
-      if (!builtMessage.equals(signedMessage)) {
+      // The fee payer must be the authenticated wallet.
+      if (!signed.feePayer?.equals(user)) {
+        throw new Error('Redeem fee payer is not the authenticated wallet.');
+      }
+
+      // The submitted tx must spend the SAME blockhash we issued, so the
+      // confirmation parameters below stay valid (and a stale/replayed redeem
+      // can't be slipped in).
+      if (signed.recentBlockhash !== args.blockhash) {
+        this.log.error?.(
+          `[redeemer] redeem rejected: blockhash changed by wallet ` +
+            `(issued ${args.blockhash.slice(0, 8)}… got ${(signed.recentBlockhash ?? 'none').slice(0, 8)}…)`,
+        );
         throw new Error('Submitted transaction does not match the redeem we issued.');
       }
 
-      // Fee payer must be the authenticated wallet (already implied by the
-      // message match, asserted explicitly as defense in depth).
-      if (!signed.feePayer?.equals(user)) {
-        throw new Error('Redeem fee payer is not the authenticated wallet.');
+      // SECURITY GATE — we are about to add the TREASURY's signature to a
+      // client-submitted transaction, so we must prove it does exactly what we
+      // built and nothing that abuses the treasury's authority. We do NOT
+      // require byte-identical messages, because real wallets (e.g. Phantom
+      // with priority fees on) legitimately prepend ComputeBudget instructions
+      // when signing. Instead:
+      //   1. every instruction WE built must appear in the submission, in
+      //      order — so the user can't drop their IOU-payment leg while
+      //      keeping the treasury's $ASTROID payout leg, and
+      //   2. the ONLY extra instructions allowed are ComputeBudget ones, which
+      //      reference no accounts and so cannot move funds or use any signer.
+      // Anything else (a foreign transfer, a second treasury debit, etc.) is
+      // rejected before the treasury ever signs.
+      const computeBudgetId = ComputeBudgetProgram.programId.toBase58();
+      const normalize = (ix: TransactionInstruction): string =>
+        JSON.stringify([
+          ix.programId.toBase58(),
+          ix.keys.map((k) => [k.pubkey.toBase58(), k.isSigner, k.isWritable]),
+          Buffer.from(ix.data).toString('base64'),
+        ]);
+      const builtIxs = built.instructions.map(normalize);
+      let next = 0;
+      for (const ix of signed.instructions) {
+        if (next < builtIxs.length && normalize(ix) === builtIxs[next]) {
+          next += 1;
+          continue;
+        }
+        if (ix.programId.toBase58() === computeBudgetId) continue;
+        this.log.error?.(
+          `[redeemer] redeem rejected: unexpected instruction ${ix.programId.toBase58()} ` +
+            `(built=${built.instructions.length} signed=${signed.instructions.length})`,
+        );
+        throw new Error('Submitted transaction does not match the redeem we issued.');
+      }
+      if (next !== builtIxs.length) {
+        this.log.error?.(
+          `[redeemer] redeem rejected: missing required instructions ` +
+            `(matched ${next}/${builtIxs.length})`,
+        );
+        throw new Error('Submitted transaction does not match the redeem we issued.');
       }
 
       // The wallet's signature must already be present and valid over the
