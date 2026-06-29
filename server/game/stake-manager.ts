@@ -79,14 +79,17 @@ export interface StakeManagerConfig {
   /** Whether on-chain Quarry custody is wired up. Defaults to false. */
   quarryEnabled?: boolean;
   /**
-   * Optional anti-spoof bound on client-reported base drill power. Drill power
-   * is self-reported by the client (there is no proof-of-work), so without a
-   * bound a wallet can report the hard cap (10M) regardless of stake and
-   * dominate shared-asteroid yield splits and raid attack power. When set, the
-   * *base* drill is clamped to `freeBase + stake × perStakeToken` before the
-   * tier multiplier is applied — everyone gets a free baseline and extra
-   * headroom scales with their staked position. Unset = no bound (legacy
-   * behaviour; used by tests).
+   * Optional stake-derived bound on base drill power. Drill power has no
+   * proof-of-work, so if it were taken from the client a wallet could report
+   * the hard cap (10M) regardless of stake and dominate shared-asteroid yield
+   * splits and raid attack power — and, worse, two similarly-staked players
+   * could look 1000× apart purely based on who maxed the input box. When this
+   * bound is set, the self-reported value is IGNORED and base drill is DERIVED
+   * deterministically as `freeBase + stake × perStakeToken` (everyone gets a
+   * free baseline; the rest scales with their staked position), then the tier
+   * multiplier applies on top. This makes drill behave like defense — a pure
+   * function of stake. Unset = no bound: the self-reported base is used as-is
+   * (legacy behaviour; used by tests).
    */
   drillPowerBound?: { freeBase: number; perStakeToken: number };
   /** Token symbol used in user-facing log strings. Defaults to "$ASTROID". */
@@ -575,7 +578,15 @@ export class StakeManager implements StakeManagerLike {
     return getStakeTier(this.getStakeAtAsteroid(walletAddress, asteroidId));
   }
 
-  /** Effective drill power for a miner at a given asteroid. */
+  /**
+   * Effective drill power for a miner at a given asteroid.
+   *
+   * When a {@link drillPowerBound} is configured (the production default) the
+   * `baseDrillPower` argument is IGNORED and base drill is derived purely from
+   * stake — `freeBase + stake × perStakeToken` — so drill is a deterministic
+   * function of stake (like defense) and can't be inflated by self-reporting.
+   * Without a bound the self-reported base is used as-is (legacy/tests).
+   */
   getEffectiveDrillPower(
     walletAddress: string,
     baseDrillPower: number,
@@ -585,12 +596,11 @@ export class StakeManager implements StakeManagerLike {
     if (!asteroid) return baseDrillPower;
     const stakeAmount = this.getStakeAtAsteroid(walletAddress, asteroidId);
     const state = this.getMinerState(walletAddress);
-    // Anti-spoof: clamp the self-reported base to what this wallet's stake
-    // justifies before the tier multiplier is applied. Without this, any
-    // client can claim the 10M hard cap regardless of stake.
-    const boundedBase = this.boundBaseDrillPower(baseDrillPower, stakeAmount);
+    const base = this.drillPowerBound
+      ? this.deriveBaseDrillPower(stakeAmount)
+      : baseDrillPower;
     return calculateEffectiveDrillPower(
-      boundedBase,
+      base,
       stakeAmount,
       state.loyaltyDays,
       asteroid.definition.resource,
@@ -598,15 +608,15 @@ export class StakeManager implements StakeManagerLike {
   }
 
   /**
-   * Clamp a self-reported base drill power to `freeBase + stake × perStakeToken`
-   * when an anti-spoof bound is configured. Returns the value unchanged when no
-   * bound is wired (legacy/test behaviour).
+   * Stake-derived base drill power: `freeBase + stake × perStakeToken`. Only
+   * meaningful when a {@link drillPowerBound} is configured; returns 0
+   * otherwise (the unbounded path never calls this).
    */
-  private boundBaseDrillPower(baseDrillPower: number, stakeAmount: number): number {
-    if (!this.drillPowerBound) return baseDrillPower;
-    const max =
-      this.drillPowerBound.freeBase + Math.max(0, stakeAmount) * this.drillPowerBound.perStakeToken;
-    return Math.min(baseDrillPower, max);
+  private deriveBaseDrillPower(stakeAmount: number): number {
+    if (!this.drillPowerBound) return 0;
+    return (
+      this.drillPowerBound.freeBase + Math.max(0, stakeAmount) * this.drillPowerBound.perStakeToken
+    );
   }
 
   /** Defense power for a wallet at a given asteroid. Implements `StakeManagerLike.getDefensePower`. */

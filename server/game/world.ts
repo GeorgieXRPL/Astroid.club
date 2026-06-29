@@ -1034,9 +1034,13 @@ export class GameWorld {
   }
 
   /**
-   * Update the player's reported drill power. The registry stores the
-   * effective value (after stake-tier multipliers) so leaderboards
-   * reflect what miners actually contribute.
+   * (Re)compute the player's effective drill power and register it. With the
+   * production drill bound enabled the `drillPower` argument is IGNORED — drill
+   * is derived from the wallet's stake (`freeBase + stake×perStakeToken`) and
+   * tier — so this acts as a "sync" that picks up stake/tier changes. The
+   * registry stores the effective value (after multipliers) so leaderboards
+   * and yield/raid math reflect what miners actually contribute. The clamp
+   * below only matters in the legacy unbounded mode used by tests.
    */
   reportDrillPower(walletAddress: string, drillPower: number): WorldResult<{ effective: number }> {
     if (!this.authedWallets.has(walletAddress)) {

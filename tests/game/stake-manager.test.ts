@@ -397,20 +397,36 @@ describe('StakeManager drill-power anti-spoof bound', () => {
     expect(manager.getEffectiveDrillPower(ALICE, 10_000_000, 'A')).toBe(5000);
   });
 
-  it('lets stake raise the allowed base, then applies the tier multiplier', () => {
+  it('derives base drill from stake, then applies the tier multiplier', () => {
     const { manager } = makeHarness({
       quarryEnabled: true,
       drillPowerBound: { freeBase: 5000, perStakeToken: 1 },
     });
     manager.setHomeStation(ALICE, 'A');
-    manager.setOnChainStake(ALICE, 50_000); // Silver → 2.0× drill, max base = 5000 + 50000
-    // Reported 1M base is clamped to 55,000, then ×2.0 Silver tier = 110,000.
+    manager.setOnChainStake(ALICE, 50_000); // Silver → 2.0× drill, base = 5000 + 50000
+    // Base derived from stake = 55,000, then ×2.0 Silver tier = 110,000.
     expect(manager.getEffectiveDrillPower(ALICE, 1_000_000, 'A')).toBe(110_000);
   });
 
-  it('leaves an honest sub-baseline report unchanged', () => {
+  it('IGNORES the self-reported value entirely when a bound is set', () => {
+    const { manager } = makeHarness({
+      quarryEnabled: true,
+      drillPowerBound: { freeBase: 5000, perStakeToken: 1 },
+    });
+    manager.setHomeStation(ALICE, 'A');
+    manager.setOnChainStake(ALICE, 50_000); // Silver → 2.0×, base = 55,000
+    // A maxed report and a tiny report both resolve to the same stake-derived
+    // value — drill is a pure function of stake, not the client's input.
+    expect(manager.getEffectiveDrillPower(ALICE, 10_000_000, 'A')).toBe(110_000);
+    expect(manager.getEffectiveDrillPower(ALICE, 1, 'A')).toBe(110_000);
+    expect(manager.getEffectiveDrillPower(ALICE, 0, 'A')).toBe(110_000);
+  });
+
+  it('a sub-baseline report still gets the full free baseline', () => {
     const { manager } = makeHarness({ drillPowerBound: { freeBase: 5000, perStakeToken: 1 } });
-    expect(manager.getEffectiveDrillPower(ALICE, 4000, 'A')).toBe(4000);
+    // No stake → base derived = freeBase 5000, ×1 Base tier. The self-reported
+    // 4000 is ignored (it would have under-reported the player's baseline).
+    expect(manager.getEffectiveDrillPower(ALICE, 4000, 'A')).toBe(5000);
   });
 });
 

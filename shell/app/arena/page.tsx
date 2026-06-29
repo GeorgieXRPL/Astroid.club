@@ -898,7 +898,6 @@ function ConnectedArena({
           })
         }
         setBetAmount={setBetAmount}
-        setDrillPower={setDrillPower}
         snapshot={snap}
         stakeAmount={stakeAmount}
         stats={selectedStats}
@@ -1429,7 +1428,6 @@ function AsteroidActionPanel({
   busy,
   error,
   drillPower,
-  setDrillPower,
   stakeAmount,
   onMine,
   onLeave,
@@ -1448,7 +1446,6 @@ function AsteroidActionPanel({
   busy: string | null;
   error: { code: string; message: string } | null;
   drillPower: number;
-  setDrillPower: (n: number) => void;
   stakeAmount: number;
   onMine: () => void;
   onLeave: () => void;
@@ -1566,16 +1563,19 @@ function AsteroidActionPanel({
             to the top stats panel. */}
         <div className="space-y-3">
           <label className="field w-full sm:max-w-[16rem]">
-            <span className="telemetry-label">Drill power</span>
+            <span className="telemetry-label">Drill power · auto from stake</span>
             <input
-              className="field-input"
-              disabled={isBusy}
+              className="field-input opacity-70"
               min={0}
-              onChange={(e) => setDrillPower(Number(e.target.value))}
+              readOnly
               step={100}
               type="number"
               value={drillPower}
             />
+            <span className="mt-1 font-mono text-[10px] leading-relaxed text-white/45">
+              Drill power is derived from your staked $ASTROID and tier — stake more to drill harder.
+              Tap <span className="text-white/80">Sync drill</span> to refresh it after staking.
+            </span>
           </label>
           <div className="flex flex-wrap items-end gap-2">
             {!isActive ? (
@@ -1596,7 +1596,7 @@ function AsteroidActionPanel({
               {isHome ? 'Your home' : busy === 'set_home_station' ? 'Setting…' : 'Set as home'}
             </button>
             <button className="btn-ghost" disabled={isBusy} onClick={onReportDrill} type="button">
-              {busy === 'report_drill_power' ? '…' : 'Set drill'}
+              {busy === 'report_drill_power' ? '…' : 'Sync drill'}
             </button>
             {canRaid && (
               <button className="btn-ember" disabled={isBusy} onClick={onLaunchRaid} type="button">
