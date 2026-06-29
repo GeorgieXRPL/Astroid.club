@@ -431,12 +431,13 @@ export class RedeemerService {
    * SECURITY — this is the gate that makes co-signing a client-submitted
    * transaction safe. The fee payer must be the authenticated wallet, the
    * blockhash must be the one we issued, and the submission must contain
-   * EXACTLY the instructions we built (in order) plus, at most, benign
-   * ComputeBudget instructions (which real wallets add for priority fees and
-   * which reference no accounts). Any other instruction — anything that could
-   * abuse the treasury's signature to move funds — is rejected before the
-   * treasury signs. The `built` transaction is supplied by the gateway from
-   * its own cache of what it issued — never reconstructed from client input.
+   * EXACTLY the instructions we built (in order) plus, at most, benign extras
+   * from programs that cannot move funds — ComputeBudget (priority fees) and
+   * Lighthouse (Phantom's transaction-guard asserts). Any other program — i.e.
+   * anything that could abuse the treasury's signature to move funds — is
+   * rejected before the treasury signs. The `built` transaction is supplied by
+   * the gateway from its own cache of what it issued — never reconstructed
+   * from client input.
    *
    * Resolves with the confirmed base58 signature; throws a sanitized error
    * on any mismatch / failure (nothing is lost — if it didn't land, the
@@ -476,17 +477,26 @@ export class RedeemerService {
       // SECURITY GATE — we are about to add the TREASURY's signature to a
       // client-submitted transaction, so we must prove it does exactly what we
       // built and nothing that abuses the treasury's authority. We do NOT
-      // require byte-identical messages, because real wallets (e.g. Phantom
-      // with priority fees on) legitimately prepend ComputeBudget instructions
-      // when signing. Instead:
-      //   1. every instruction WE built must appear in the submission, in
-      //      order — so the user can't drop their IOU-payment leg while
-      //      keeping the treasury's $ASTROID payout leg, and
-      //   2. the ONLY extra instructions allowed are ComputeBudget ones, which
-      //      reference no accounts and so cannot move funds or use any signer.
-      // Anything else (a foreign transfer, a second treasury debit, etc.) is
-      // rejected before the treasury ever signs.
-      const computeBudgetId = ComputeBudgetProgram.programId.toBase58();
+      // require byte-identical messages, because real wallets legitimately add
+      // instructions when signing — Phantom prepends ComputeBudget (priority
+      // fees) AND appends Lighthouse assertion guards, so a 3-instruction
+      // redeem can come back with a dozen. We enforce two rules:
+      //   1. every instruction WE built must appear, in order — so the user
+      //      can't drop their IOU-payment leg while keeping the treasury's
+      //      $ASTROID payout leg, and
+      //   2. every EXTRA instruction must belong to a program that provably
+      //      cannot move funds: ComputeBudget (only sets fee/CU; touches no
+      //      accounts) or Lighthouse (assertions + writes to its own PDAs; it
+      //      cannot CPI-transfer SPL/SOL out of any account). A signature is
+      //      transaction-wide, so we can't tell per-instruction whether the
+      //      treasury "signs" a given extra — hence we gate on the PROGRAM,
+      //      not on signer flags. Any other program in an extra is rejected
+      //      before the treasury ever signs.
+      const SAFE_EXTRA_PROGRAMS = new Set<string>([
+        ComputeBudgetProgram.programId.toBase58(),
+        // Lighthouse — Phantom's transaction-guard program.
+        'L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95',
+      ]);
       const normalize = (ix: TransactionInstruction): string =>
         JSON.stringify([
           ix.programId.toBase58(),
@@ -500,9 +510,9 @@ export class RedeemerService {
           next += 1;
           continue;
         }
-        if (ix.programId.toBase58() === computeBudgetId) continue;
+        if (SAFE_EXTRA_PROGRAMS.has(ix.programId.toBase58())) continue;
         this.log.error?.(
-          `[redeemer] redeem rejected: unexpected instruction ${ix.programId.toBase58()} ` +
+          `[redeemer] redeem rejected: unexpected program ${ix.programId.toBase58()} ` +
             `(built=${built.instructions.length} signed=${signed.instructions.length})`,
         );
         throw new Error('Submitted transaction does not match the redeem we issued.');

@@ -15,11 +15,12 @@
 import {
   ComputeBudgetProgram,
   Keypair,
+  PublicKey,
   SystemProgram,
   Transaction,
   TransactionInstruction,
 } from '@solana/web3.js';
-import type { Connection, PublicKey } from '@solana/web3.js';
+import type { Connection } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -321,7 +322,49 @@ describe('RedeemerService.coSignAndSubmitRedeem (wallet-first co-sign gate)', ()
     expect(submitted.instructions).toHaveLength(2);
   });
 
-  it('refuses an extra NON-ComputeBudget instruction (treasury-signature abuse)', async () => {
+  it('tolerates wallet-appended guard instructions that do not use the treasury signature (e.g. Lighthouse)', async () => {
+    // Phantom appends Lighthouse assertion instructions when signing. They
+    // reference accounts but never the treasury as a SIGNER, so they can't
+    // touch treasury assets — they must be accepted.
+    const user = Keypair.generate();
+    const treasury = Keypair.generate();
+    const { conn, sent } = fakeConnection('sig-lh'.padEnd(64, '1'));
+    const service = makeService(treasury, conn);
+
+    const built = makeSwap(user.publicKey, treasury.publicKey);
+    const builtTransaction = built
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString('base64');
+
+    const guarded = new Transaction();
+    guarded.add(built.instructions[0]!);
+    // A Lighthouse-style assert: references the treasury account but only as a
+    // read-only, NON-signer input. Safe — it can only abort the tx.
+    guarded.add(
+      new TransactionInstruction({
+        programId: new PublicKey('L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95'),
+        keys: [{ pubkey: treasury.publicKey, isSigner: false, isWritable: false }],
+        data: Buffer.from([1, 1]),
+      }),
+    );
+    guarded.feePayer = user.publicKey;
+    guarded.recentBlockhash = BLOCKHASH;
+    guarded.partialSign(user);
+    const signedTransaction = guarded
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString('base64');
+
+    const signature = await service.coSignAndSubmitRedeem(user.publicKey.toBase58(), {
+      builtTransaction,
+      signedTransaction,
+      blockhash: BLOCKHASH,
+      lastValidBlockHeight: 1000,
+    });
+    expect(signature).toBe('sig-lh'.padEnd(64, '1'));
+    expect(sent).toHaveLength(1);
+  });
+
+  it('refuses an extra instruction that wields the treasury signature', async () => {
     const user = Keypair.generate();
     const treasury = Keypair.generate();
     const service = makeService(treasury, fakeConnection().conn);
@@ -331,8 +374,9 @@ describe('RedeemerService.coSignAndSubmitRedeem (wallet-first co-sign gate)', ()
       .serialize({ requireAllSignatures: false, verifySignatures: false })
       .toString('base64');
 
-    // The client smuggles in an extra instruction that would also be covered
-    // by the treasury signature — must be rejected before the treasury signs.
+    // The client smuggles in an extra instruction that requires the TREASURY
+    // to sign (i.e. could move treasury funds) — must be rejected before the
+    // treasury ever signs.
     const tampered = new Transaction();
     tampered.add(built.instructions[0]!);
     tampered.add(
