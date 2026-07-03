@@ -51,6 +51,7 @@ import type {
   CompWalletStore,
   EscrowStore,
   EscrowWagerRecord,
+  HandleStore,
   HomeStationStore,
   PendingYieldStore,
   RaidVaultStore,
@@ -62,6 +63,7 @@ import { AstroidGateway } from './net/gateway.js';
 import { PostgresGameStore } from './storage/postgres-store.js';
 import { RedisGameStore } from './storage/redis-store.js';
 import { CompWalletService } from './verification/comp-wallets.js';
+import { HandleService } from './verification/handles.js';
 import { HolderTracker } from './verification/holder-tracker.js';
 
 function logRuntime(): void {
@@ -522,6 +524,7 @@ async function main(): Promise<void> {
   let raidVaultStore: RaidVaultStore | undefined;
   let escrowStore: EscrowStore | undefined;
   let compWalletStore: CompWalletStore | undefined;
+  let handleStore: HandleStore | undefined;
   if (runtime.databaseUrl) {
     postgresStore = new PostgresGameStore({
       connectionString: runtime.databaseUrl,
@@ -532,6 +535,7 @@ async function main(): Promise<void> {
     raidVaultStore = postgresStore.raidVault;
     escrowStore = postgresStore.escrow;
     compWalletStore = postgresStore.compWallets;
+    handleStore = postgresStore.handles;
     console.info(
       '[astroid-club] Postgres persistence ENABLED — auditable yield ledger + home ' +
         'stations are the durable system of record.',
@@ -543,6 +547,7 @@ async function main(): Promise<void> {
     raidVaultStore = redisStore.raidVault;
     escrowStore = redisStore.escrow;
     compWalletStore = redisStore.compWallets;
+    handleStore = redisStore.handles;
     console.info(
       '[astroid-club] Redis persistence ENABLED — home stations and pending IOU ' +
         'credits survive restarts (balance cache; no audit log — see docs/SUPABASE.md).',
@@ -589,6 +594,17 @@ async function main(): Promise<void> {
     console.info(
       '[astroid-club] comp-wallet list is in-memory only (no DATABASE_URL/REDIS_URL); ' +
         'admin-added wallets reset on restart.',
+    );
+  }
+
+  // Chat handles (display names): durable when a store is configured, otherwise
+  // in-memory only (reset on restart). Loaded on boot for uniqueness checks.
+  const handles = new HandleService({ store: handleStore, logger: console });
+  await handles.load();
+  if (!handleStore) {
+    console.info(
+      '[astroid-club] chat handles are in-memory only (no DATABASE_URL/REDIS_URL); ' +
+        'they reset on restart.',
     );
   }
 
@@ -719,6 +735,7 @@ async function main(): Promise<void> {
     server: httpServer,
     walletAllowlist: runtime.walletAllowlist,
     compWallets,
+    handles,
     // Route the "deposit landed but raid couldn't launch" refund through the
     // durable outbox so a chain failure is recorded + retried, not lost.
     ...(escrowManager && {

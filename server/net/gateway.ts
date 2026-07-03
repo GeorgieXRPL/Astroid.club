@@ -54,12 +54,15 @@ import type { GameLogger } from '../game/interfaces.js';
 import type { GameWorld, WorldResult } from '../game/world.js';
 import { ANONYMOUS_WALLET } from '../verification/anti-cheat.js';
 import type { CompWalletService } from '../verification/comp-wallets.js';
+import { HandleError, type HandleService } from '../verification/handles.js';
 
 import {
   GameMessage,
+  MAX_CHAT_LENGTH,
   POST_AUTH_TYPES,
   READONLY_MESSAGE_TYPES,
   createAstroidProtocol,
+  type ChatLine,
   type ErrorEnvelope,
   type EventEnvelope,
   type GameMessage as GameMessageT,
@@ -166,6 +169,12 @@ export interface AstroidGatewayOptions {
    * from the admin console.
    */
   compWallets?: CompWalletService;
+  /**
+   * Optional chat-handle service. Resolves a wallet's display name for chat
+   * lines / connect snapshots and persists `set_handle` claims. Omit to run
+   * with wallet-only identity.
+   */
+  handles?: HandleService;
 }
 
 /** What we stash on `conn.meta`. */
@@ -213,6 +222,27 @@ const REDEEM_PENDING_TTL_MS = 90_000;
  */
 const WAGER_PENDING_TTL_MS = 180_000;
 
+/** How many recent chat lines to retain + serve to new joiners. */
+const CHAT_HISTORY_MAX = 100;
+/** Chat rate limit: at most this many messages per {@link CHAT_WINDOW_MS}. */
+const CHAT_MAX_PER_WINDOW = 5;
+const CHAT_WINDOW_MS = 10_000;
+
+/**
+ * Normalize a chat line for safe storage/broadcast. React escapes on render,
+ * so this is hygiene against abuse — invisible/zero-width chars and multi-line
+ * walls — not XSS. Control chars become spaces, zero-width chars are dropped,
+ * whitespace runs collapse to a single space, and the result is length-clamped.
+ */
+function sanitizeChatText(raw: string): string {
+  return raw
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_CHAT_LENGTH);
+}
+
 /**
  * Composes `WSGateway` + zod `Protocol` + `WalletVerifier` into a
  * single mountable unit. Owns its tick interval; close cleanly via
@@ -229,6 +259,7 @@ export class AstroidGateway {
   private readonly appName: string;
   private readonly walletAllowlist: ReadonlySet<string>;
   private readonly compWallets?: CompWalletService;
+  private readonly handles?: HandleService;
   private readonly onWagerRefund?: (
     walletAddress: string,
     amount: number,
@@ -236,6 +267,17 @@ export class AstroidGateway {
   ) => void;
   private tickHandle: ReturnType<typeof setInterval> | null = null;
   private running = false;
+
+  /**
+   * In-memory chat backlog (oldest→newest), capped at {@link CHAT_HISTORY_MAX}.
+   * Served to just-connected clients via `chat_history` so they have context.
+   * Ephemeral by design — a restart clears it (chat is not persisted).
+   */
+  private readonly chatHistory: ChatLine[] = [];
+  /** Per-wallet chat send timestamps (epoch ms) for the chat-specific limiter. */
+  private readonly chatTimestamps = new Map<string, number[]>();
+  /** Monotonic counter to make chat line ids unique within a millisecond. */
+  private chatSeq = 0;
 
   constructor(options: AstroidGatewayOptions) {
     this.world = options.world;
@@ -248,6 +290,7 @@ export class AstroidGateway {
     this.appName = options.appName ?? 'astroid.club';
     this.walletAllowlist = new Set(options.walletAllowlist ?? []);
     this.compWallets = options.compWallets;
+    this.handles = options.handles;
     this.onWagerRefund = options.onWagerRefund;
     if (this.walletAllowlist.size > 0) {
       this.log.warn(
@@ -390,7 +433,10 @@ export class AstroidGateway {
     // Remember what we're dispatching so failed-action logging can name the
     // offending message instead of an opaque "Failed action #N".
     meta.currentAction = message.type;
-    if (!READONLY_MESSAGE_TYPES.has(message.type)) {
+    // `send_chat` is exempt from the game-action budget (chatting must not
+    // burn the budget that gates staking/raiding) — it has its own dedicated
+    // limiter applied in the handler below.
+    if (!READONLY_MESSAGE_TYPES.has(message.type) && message.type !== 'send_chat') {
       const rl = this.world.antiCheat.checkAction(wallet, conn.ip);
       if (!rl.allowed) {
         this.replyError(conn, requestId, 'rate_limited', rl.reason ?? 'rate limited');
@@ -474,6 +520,7 @@ export class AstroidGateway {
         // because the IP was only ever keyed under the anonymous sentinel).
         this.world.antiCheat.registerAuthenticatedConnection(message.walletAddress, conn.ip);
         const result = await this.world.connectPlayer(message.walletAddress);
+        if (result.ok) result.data.handle = this.handles?.get(message.walletAddress) ?? null;
         this.relay(conn, requestId, result);
         // Seed the in-game stake tier from the wallet's on-chain Quarry
         // position so drill-power/defense buffs apply from the first action
@@ -629,15 +676,27 @@ export class AstroidGateway {
       case 'network_stats':
         this.replyOk(conn, requestId, this.world.getNetworkStats());
         return;
-      case 'miner_snapshot':
-        this.relay(conn, requestId, this.world.getMinerSnapshot(meta.walletAddress!));
+      case 'miner_snapshot': {
+        const snap = this.world.getMinerSnapshot(meta.walletAddress!);
+        if (snap.ok) snap.data.handle = this.handles?.get(meta.walletAddress!) ?? null;
+        this.relay(conn, requestId, snap);
         return;
+      }
       case 'verify_holder': {
         const wallet = meta.walletAddress!;
         const data = await this.runHolderVerification(wallet);
         this.replyOk(conn, requestId, data);
         return;
       }
+      case 'chat_history':
+        this.replyOk(conn, requestId, { messages: this.chatHistory });
+        return;
+      case 'send_chat':
+        this.handleSendChat(conn, requestId, message.text);
+        return;
+      case 'set_handle':
+        await this.handleSetHandle(conn, requestId, message.handle);
+        return;
       default: {
         const exhaustive: never = message;
         void exhaustive;
@@ -661,6 +720,77 @@ export class AstroidGateway {
    * RPC errors propagate up to `dispatch`'s try/catch and surface as a
    * generic `error` envelope. Anti-cheat backoff applies.
    */
+  /**
+   * Handle a `send_chat`: apply the dedicated chat limiter, sanitize the text,
+   * append to the in-memory backlog, and broadcast to every client as a
+   * `chat_message` event. Chat is ephemeral (not persisted) and exempt from
+   * the game-action budget — this limiter is its only throttle.
+   */
+  private handleSendChat(conn: Connection, requestId: string | undefined, rawText: string): void {
+    const meta = conn.meta as ConnectionMeta;
+    const wallet = meta.walletAddress!;
+
+    const now = Date.now();
+    const recent = (this.chatTimestamps.get(wallet) ?? []).filter((t) => now - t < CHAT_WINDOW_MS);
+    if (recent.length >= CHAT_MAX_PER_WINDOW) {
+      this.replyError(conn, requestId, 'rate_limited', 'You are sending messages too fast.');
+      return;
+    }
+    recent.push(now);
+    this.chatTimestamps.set(wallet, recent);
+
+    const text = sanitizeChatText(rawText);
+    if (!text) {
+      this.replyError(conn, requestId, 'rejected', 'Message is empty.');
+      return;
+    }
+
+    const line: ChatLine = {
+      id: `${now}-${this.chatSeq++}`,
+      walletAddress: wallet,
+      handle: this.handles?.get(wallet) ?? null,
+      text,
+      asteroidId: this.world.registry.getMinerLocation(wallet) ?? null,
+      sentAt: now,
+    };
+    this.chatHistory.push(line);
+    if (this.chatHistory.length > CHAT_HISTORY_MAX) {
+      this.chatHistory.splice(0, this.chatHistory.length - CHAT_HISTORY_MAX);
+    }
+    this.broadcastEvent('chat_message', line);
+    // Ack the sender so their `send()` promise resolves.
+    this.replyOk(conn, requestId, { ok: true, id: line.id });
+  }
+
+  /**
+   * Handle a `set_handle`: claim/change the wallet's chat handle. The
+   * `HandleService` validates + enforces uniqueness and persists it; a taken /
+   * invalid name comes back as a `HandleError` we surface as a `rejected` error
+   * (a benign, expected outcome — no anti-cheat penalty). Replies `{ handle }`.
+   */
+  private async handleSetHandle(
+    conn: Connection,
+    requestId: string | undefined,
+    rawHandle: string,
+  ): Promise<void> {
+    const meta = conn.meta as ConnectionMeta;
+    const wallet = meta.walletAddress!;
+    if (!this.handles) {
+      this.replyError(conn, requestId, 'unavailable', 'Handles are not available.');
+      return;
+    }
+    try {
+      const handle = await this.handles.set(wallet, rawHandle);
+      this.replyOk(conn, requestId, { handle });
+    } catch (err) {
+      if (err instanceof HandleError) {
+        this.replyError(conn, requestId, 'rejected', err.message);
+        return;
+      }
+      throw err;
+    }
+  }
+
   private async runHolderVerification(walletAddress: string): Promise<HolderEligibilityData> {
     // Comp list: wallets the operator has comped past the holder gate (team,
     // partners, testers). Checked first so they pass regardless of holdings.

@@ -27,6 +27,7 @@ import type { GameLogger } from '../../server/game/interfaces.js';
 import { GameWorld } from '../../server/game/world.js';
 import { AstroidGateway } from '../../server/net/gateway.js';
 import { CompWalletService } from '../../server/verification/comp-wallets.js';
+import { HandleService } from '../../server/verification/handles.js';
 
 const silentLogger: GameLogger = {
   info: () => {},
@@ -75,6 +76,8 @@ interface HarnessOptions {
   walletAllowlist?: readonly string[];
   /** Optional comp/holder-gate-bypass service forwarded to the gateway. */
   compWallets?: CompWalletService;
+  /** Optional chat-handle service forwarded to the gateway. */
+  handles?: HandleService;
 }
 
 /**
@@ -134,6 +137,7 @@ async function startHarness(opts: HarnessOptions = {}): Promise<Harness> {
     ...(opts.chainOps && { chainOps: opts.chainOps }),
     ...(opts.walletAllowlist && { walletAllowlist: opts.walletAllowlist }),
     ...(opts.compWallets && { compWallets: opts.compWallets }),
+    ...(opts.handles && { handles: opts.handles }),
   });
   gateway.start();
   return { gateway, world, httpServer, port };
@@ -1386,6 +1390,277 @@ describe('AstroidGateway lifecycle', () => {
     expect(reply.event).toBe('hello');
     expect(reply.data.msg).toBe('world');
     sock.close();
+    await stopHarness(h);
+  });
+});
+
+describe('AstroidGateway chat', () => {
+  async function authedSocket(port: number): Promise<{ sock: WebSocket; wallet: string }> {
+    const { walletAddress, sign } = makeWallet();
+    const sock = await openSocket(port);
+    const nonceReply = (await send(sock, { type: 'request_nonce', walletAddress })) as {
+      data: { nonce: string; message: string };
+    };
+    await send(sock, {
+      type: 'auth',
+      walletAddress,
+      nonce: nonceReply.data.nonce,
+      signature: sign(nonceReply.data.message),
+    });
+    return { sock, wallet: walletAddress };
+  }
+
+  /** Resolve with the payload of the next `chat_message` event on `sock`. */
+  function nextChatEvent(sock: WebSocket): Promise<{
+    id: string;
+    walletAddress: string;
+    text: string;
+    asteroidId: string | null;
+    sentAt: number;
+  }> {
+    return new Promise((resolve, reject) => {
+      const onMessage = (data: WebSocket.RawData) => {
+        const msg = JSON.parse(data.toString('utf-8'));
+        if (msg.type !== 'event' || msg.event !== 'chat_message') return;
+        sock.off('message', onMessage);
+        sock.off('error', onError);
+        resolve(msg.data);
+      };
+      const onError = (err: Error) => {
+        sock.off('message', onMessage);
+        sock.off('error', onError);
+        reject(err);
+      };
+      sock.on('message', onMessage);
+      sock.on('error', onError);
+    });
+  }
+
+  /** Send a `send_chat` and resolve with the request's ack/error (ignores events). */
+  function chat(
+    sock: WebSocket,
+    text: string,
+    requestId: string,
+  ): Promise<{ type: string; code?: string; data?: unknown }> {
+    return new Promise((resolve, reject) => {
+      const onMessage = (data: WebSocket.RawData) => {
+        const msg = JSON.parse(data.toString('utf-8'));
+        if (msg.type === 'event' || msg.requestId !== requestId) return;
+        sock.off('message', onMessage);
+        sock.off('error', onError);
+        resolve(msg);
+      };
+      const onError = (err: Error) => {
+        sock.off('message', onMessage);
+        sock.off('error', onError);
+        reject(err);
+      };
+      sock.on('message', onMessage);
+      sock.on('error', onError);
+      sock.send(JSON.stringify({ type: 'send_chat', text, requestId }));
+    });
+  }
+
+  it('broadcasts send_chat to every client as a sanitized chat_message', async () => {
+    const h = await startHarness();
+    const a = await authedSocket(h.port);
+    const b = await authedSocket(h.port);
+    const gotByB = nextChatEvent(b.sock);
+    a.sock.send(JSON.stringify({ type: 'send_chat', text: '  hi\n\nthere\u0007  ', requestId: 'c1' }));
+    const line = await gotByB;
+    expect(line.walletAddress).toBe(a.wallet);
+    // Control char stripped, whitespace/newlines collapsed, ends trimmed.
+    expect(line.text).toBe('hi there');
+    expect(typeof line.id).toBe('string');
+    a.sock.close();
+    b.sock.close();
+    await stopHarness(h);
+  });
+
+  it('serves recent lines via chat_history', async () => {
+    const h = await startHarness();
+    const a = await authedSocket(h.port);
+    const got = nextChatEvent(a.sock);
+    a.sock.send(JSON.stringify({ type: 'send_chat', text: 'gm belt', requestId: 'c1' }));
+    await got;
+    const hist = (await send(a.sock, { type: 'chat_history', requestId: 'h1' })) as {
+      type: string;
+      data: { messages: Array<{ text: string; walletAddress: string }> };
+    };
+    expect(hist.type).toBe('result');
+    expect(hist.data.messages.length).toBeGreaterThanOrEqual(1);
+    const last = hist.data.messages[hist.data.messages.length - 1];
+    expect(last).toBeDefined();
+    expect(last?.text).toBe('gm belt');
+    expect(last?.walletAddress).toBe(a.wallet);
+    a.sock.close();
+    await stopHarness(h);
+  });
+
+  it('rejects send_chat before auth', async () => {
+    const h = await startHarness();
+    const sock = await openSocket(h.port);
+    const reply = (await send(sock, { type: 'send_chat', text: 'hi', requestId: 'c1' })) as {
+      type: string;
+      code?: string;
+    };
+    expect(reply.type).toBe('error');
+    expect(reply.code).toBe('not_authenticated');
+    sock.close();
+    await stopHarness(h);
+  });
+
+  it('applies a dedicated chat rate limit (5 per window)', async () => {
+    const h = await startHarness();
+    const a = await authedSocket(h.port);
+    for (let i = 0; i < 5; i += 1) {
+      const ok = await chat(a.sock, `line ${i}`, `c${i}`);
+      expect(ok.type).toBe('result');
+    }
+    const sixth = await chat(a.sock, 'one too many', 'c5');
+    expect(sixth.type).toBe('error');
+    expect(sixth.code).toBe('rate_limited');
+    a.sock.close();
+    await stopHarness(h);
+  });
+
+  it('does NOT let chatting exhaust the game-action budget', async () => {
+    // Chat is exempt from the per-wallet action budget; a burst of chat must
+    // not lock the wallet out of real actions. Send the max chat lines, then a
+    // game action should still be accepted (not rate_limited).
+    const h = await startHarness();
+    const a = await authedSocket(h.port);
+    for (let i = 0; i < 5; i += 1) {
+      await chat(a.sock, `spam ${i}`, `c${i}`);
+    }
+    const join = (await send(a.sock, {
+      type: 'join_asteroid',
+      asteroidId: 'home',
+      requestId: 'j1',
+    })) as { type: string; code?: string };
+    expect(join.type).toBe('result');
+    a.sock.close();
+    await stopHarness(h);
+  });
+});
+
+describe('AstroidGateway chat handles', () => {
+  async function authedSocket(port: number): Promise<{ sock: WebSocket; wallet: string }> {
+    const { walletAddress, sign } = makeWallet();
+    const sock = await openSocket(port);
+    const nonceReply = (await send(sock, { type: 'request_nonce', walletAddress })) as {
+      data: { nonce: string; message: string };
+    };
+    await send(sock, {
+      type: 'auth',
+      walletAddress,
+      nonce: nonceReply.data.nonce,
+      signature: sign(nonceReply.data.message),
+    });
+    return { sock, wallet: walletAddress };
+  }
+
+  function nextChatEvent(sock: WebSocket): Promise<{
+    walletAddress: string;
+    handle: string | null;
+    text: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      const onMessage = (data: WebSocket.RawData) => {
+        const msg = JSON.parse(data.toString('utf-8'));
+        if (msg.type !== 'event' || msg.event !== 'chat_message') return;
+        sock.off('message', onMessage);
+        sock.off('error', onError);
+        resolve(msg.data);
+      };
+      const onError = (err: Error) => {
+        sock.off('message', onMessage);
+        sock.off('error', onError);
+        reject(err);
+      };
+      sock.on('message', onMessage);
+      sock.on('error', onError);
+    });
+  }
+
+  it('sets a handle and stamps it on subsequent chat lines', async () => {
+    const h = await startHarness({ handles: new HandleService() });
+    const a = await authedSocket(h.port);
+    const set = (await send(a.sock, {
+      type: 'set_handle',
+      handle: 'Nova',
+      requestId: 's1',
+    })) as { type: string; data: { handle: string } };
+    expect(set.type).toBe('result');
+    expect(set.data.handle).toBe('Nova');
+
+    const got = nextChatEvent(a.sock);
+    a.sock.send(JSON.stringify({ type: 'send_chat', text: 'gm', requestId: 'c1' }));
+    const line = await got;
+    expect(line.walletAddress).toBe(a.wallet);
+    expect(line.handle).toBe('Nova');
+    a.sock.close();
+    await stopHarness(h);
+  });
+
+  it('rejects a handle already taken by another wallet', async () => {
+    const handles = new HandleService();
+    const h = await startHarness({ handles });
+    const a = await authedSocket(h.port);
+    const b = await authedSocket(h.port);
+    await send(a.sock, { type: 'set_handle', handle: 'Nova', requestId: 's1' });
+    const taken = (await send(b.sock, {
+      type: 'set_handle',
+      handle: 'nova',
+      requestId: 's2',
+    })) as { type: string; code?: string; message?: string };
+    expect(taken.type).toBe('error');
+    expect(taken.code).toBe('rejected');
+    expect(taken.message).toMatch(/taken/i);
+    a.sock.close();
+    b.sock.close();
+    await stopHarness(h);
+  });
+
+  it('rejects an invalid handle', async () => {
+    const h = await startHarness({ handles: new HandleService() });
+    const a = await authedSocket(h.port);
+    const bad = (await send(a.sock, {
+      type: 'set_handle',
+      handle: 'x',
+      requestId: 's1',
+    })) as { type: string; code?: string };
+    expect(bad.type).toBe('error');
+    expect(bad.code).toBe('rejected');
+    a.sock.close();
+    await stopHarness(h);
+  });
+
+  it('includes the handle on miner_snapshot after it is set', async () => {
+    const h = await startHarness({ handles: new HandleService() });
+    const a = await authedSocket(h.port);
+    await send(a.sock, { type: 'set_handle', handle: 'Quasar', requestId: 's1' });
+    const snap = (await send(a.sock, { type: 'miner_snapshot', requestId: 'm1' })) as {
+      type: string;
+      data: { handle: string | null };
+    };
+    expect(snap.type).toBe('result');
+    expect(snap.data.handle).toBe('Quasar');
+    a.sock.close();
+    await stopHarness(h);
+  });
+
+  it('reports unavailable when no handle service is wired', async () => {
+    const h = await startHarness();
+    const a = await authedSocket(h.port);
+    const res = (await send(a.sock, {
+      type: 'set_handle',
+      handle: 'Nova',
+      requestId: 's1',
+    })) as { type: string; code?: string };
+    expect(res.type).toBe('error');
+    expect(res.code).toBe('unavailable');
+    a.sock.close();
     await stopHarness(h);
   });
 });

@@ -117,6 +117,12 @@ export type WorldErrorCode =
 /** Snapshot returned by `connectPlayer` and `getMinerSnapshot`. */
 export interface ConnectSnapshot {
   walletAddress: string;
+  /**
+   * The wallet's chat handle (display name), or null if unset. Not populated by
+   * the world itself — the gateway augments it from the `HandleService` before
+   * relaying, so identity/handle concerns stay out of core game state.
+   */
+  handle?: string | null;
   homeStationAsteroidId: string | null;
   activeAsteroidId: string | null;
   /**

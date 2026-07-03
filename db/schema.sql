@@ -85,6 +85,18 @@ CREATE TABLE IF NOT EXISTS comp_wallets (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Player-chosen chat handles (display names). One row per wallet (last write
+-- wins). Handles are unique case-insensitively — the unique index on lower(handle)
+-- enforces it at the DB level; the in-memory HandleService also enforces it so a
+-- taken name is rejected before the write.
+CREATE TABLE IF NOT EXISTS handles (
+  wallet      TEXT PRIMARY KEY,
+  handle      TEXT NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS handles_lower_unique ON handles (lower(handle));
+
 -- Current pending-yield balance per wallet, derived from the event log.
 -- Read on boot to repopulate in-memory state. `security_invoker = on` makes the
 -- view run with the QUERYING user's privileges (not the creator's), so it
@@ -113,6 +125,7 @@ ALTER TABLE yield_events   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE raid_vaults    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE escrow_wagers  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE comp_wallets   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE handles        ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON home_stations, yield_events, raid_vaults, escrow_wagers, comp_wallets
+REVOKE ALL ON home_stations, yield_events, raid_vaults, escrow_wagers, comp_wallets, handles
   FROM anon, authenticated;

@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from 'next/font/google';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { FloatingChat } from '@/components/chat/FloatingChat';
 import { HideOnArena } from '@/components/chrome-visibility';
 import { SiteNav } from '@/components/site-nav';
 import { RootWalletProviders } from '@/lib/wallet-source-providers';
@@ -80,6 +81,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       <body className="flex min-h-screen flex-col antialiased">
         <RootWalletProviders>
           <LayoutChrome>{children}</LayoutChrome>
+          <FloatingChat />
         </RootWalletProviders>
       </body>
     </html>

@@ -194,6 +194,20 @@ export interface CompWalletStore {
 }
 
 /**
+ * Pluggable persistence for player-chosen chat handles (display names). The
+ * `HandleService` keeps in-memory wallet↔handle maps as the runtime source of
+ * truth (uniqueness is enforced there) and mirrors writes here so handles
+ * survive restarts. Without a store handles are in-memory only and reset on
+ * restart. Methods may be sync or async.
+ */
+export interface HandleStore {
+  /** Read every persisted wallet → handle. Used on boot. */
+  getAll(): Promise<Map<string, string>> | Map<string, string>;
+  /** Persist (or overwrite) a wallet's handle. */
+  set(walletAddress: string, handle: string): Promise<void> | void;
+}
+
+/**
  * Durable, AUDITABLE persistence for pending yield as an append-only
  * event log (the production posture — Postgres/Supabase). Where
  * `PendingYieldStore` mirrors only the *current balance* (a cache, e.g.

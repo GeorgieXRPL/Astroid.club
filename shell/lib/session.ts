@@ -52,6 +52,8 @@ export interface StakeTierProgress {
 /** A server snapshot returned at connect time (mirrors `ConnectSnapshot`). */
 export interface ConnectSnapshot {
   walletAddress: string;
+  /** The wallet's chat handle (display name), or null/undefined if unset. */
+  handle?: string | null;
   homeStationAsteroidId: string | null;
   activeAsteroidId: string | null;
   totalStake: number;
@@ -217,6 +219,20 @@ export interface UserStakeInfo {
   pendingRewards: number;
   lastStakeTime: string | null;
   minerPDA: string | null;
+}
+
+/**
+ * One chat line, mirroring the server's `ChatLine`. Broadcast as a
+ * `chat_message` event and returned by {@link Session.getChatHistory}.
+ */
+export interface ChatLine {
+  id: string;
+  walletAddress: string;
+  /** Author's chat handle at send time, or null if they haven't set one. */
+  handle: string | null;
+  text: string;
+  asteroidId: string | null;
+  sentAt: number;
 }
 
 interface ResultEnvelope<T = unknown> {
@@ -465,6 +481,34 @@ export class Session {
    */
   getCredsBalance(options: { timeoutMs?: number } = {}): Promise<number> {
     return this.send<number>({ type: 'creds_balance' }, options);
+  }
+
+  // -------- Chat --------
+
+  /**
+   * Send a chat line to the global belt channel. The server attributes the
+   * author from the connection (never the body), sanitizes + rate-limits it,
+   * and broadcasts it to everyone as a `chat_message` event (subscribe via
+   * {@link on}). Resolves once the server acks; rejects on rate limit / error.
+   */
+  sendChat(text: string, options: { timeoutMs?: number } = {}): Promise<{ ok: boolean; id: string }> {
+    return this.send<{ ok: boolean; id: string }>({ type: 'send_chat', text }, options);
+  }
+
+  /** Fetch the recent chat backlog (oldest→newest) so the UI has context. */
+  async getChatHistory(options: { timeoutMs?: number } = {}): Promise<ChatLine[]> {
+    const res = await this.send<{ messages: ChatLine[] }>({ type: 'chat_history' }, options);
+    return res.messages ?? [];
+  }
+
+  /**
+   * Claim (or change) this wallet's chat handle (display name). Resolves with
+   * the stored form on success; rejects ({@link SessionError} `rejected`) when
+   * the name is invalid or already taken.
+   */
+  async setHandle(handle: string, options: { timeoutMs?: number } = {}): Promise<string> {
+    const res = await this.send<{ handle: string }>({ type: 'set_handle', handle }, options);
+    return res.handle;
   }
 
   /** Close the socket. Idempotent. */

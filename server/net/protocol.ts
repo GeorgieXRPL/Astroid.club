@@ -288,6 +288,48 @@ export const VerifyHolderMessage = z.object({
   requestId: RequestId,
 });
 
+// ---------- Chat ----------
+
+/** Max characters in a single chat message (post-trim). */
+export const MAX_CHAT_LENGTH = 280;
+
+/**
+ * Send a chat line to the global belt channel. The author identity is
+ * ALWAYS taken from the connection meta (`walletAddress`) — never the
+ * body — so a client can't spoof another wallet. The text is trimmed and
+ * hard-capped here; the gateway does the rate limiting and re-broadcasts
+ * it to every connected client as a `chat_message` event.
+ */
+export const SendChatMessage = z.object({
+  type: z.literal('send_chat'),
+  requestId: RequestId,
+  text: z
+    .string()
+    .min(1)
+    .max(2000) // generous wire cap; trimmed + clamped to MAX_CHAT_LENGTH server-side
+    .transform((s) => s.trim())
+    .refine((s) => s.length > 0, 'message is empty'),
+});
+
+/** Fetch the recent chat backlog so a just-connected client has context. */
+export const ChatHistoryMessage = z.object({
+  type: z.literal('chat_history'),
+  requestId: RequestId,
+});
+
+/**
+ * Claim (or change) the authenticated wallet's chat handle (display name).
+ * Validation + case-insensitive uniqueness are enforced server-side by the
+ * `HandleService`; the wide wire cap here just bounds the payload. Replies with
+ * `result { handle }` (the stored form) or an error (`rejected`) when the name
+ * is invalid or already taken.
+ */
+export const SetHandleMessage = z.object({
+  type: z.literal('set_handle'),
+  requestId: RequestId,
+  handle: z.string().min(1).max(64),
+});
+
 // ---------- Aggregate ----------
 
 /**
@@ -324,6 +366,9 @@ export const GameMessage = z.discriminatedUnion('type', [
   NetworkStatsMessage,
   MinerSnapshotMessage,
   VerifyHolderMessage,
+  SendChatMessage,
+  ChatHistoryMessage,
+  SetHandleMessage,
 ]);
 
 export type GameMessage = z.infer<typeof GameMessage>;
@@ -356,6 +401,9 @@ export const POST_AUTH_TYPES: ReadonlySet<GameMessageType> = new Set<GameMessage
   'network_stats',
   'miner_snapshot',
   'verify_holder',
+  'send_chat',
+  'chat_history',
+  'set_handle',
 ]);
 
 /**
@@ -374,6 +422,8 @@ export const POST_AUTH_TYPES: ReadonlySet<GameMessageType> = new Set<GameMessage
 export const READONLY_MESSAGE_TYPES: ReadonlySet<GameMessageType> = new Set<GameMessageType>([
   'network_stats',
   'miner_snapshot',
+  // Serves the in-memory chat backlog; no wallet/game-state mutation, no RPC.
+  'chat_history',
 ]);
 
 /** Whether a given message must be sent over an authenticated connection. */
@@ -406,6 +456,26 @@ export interface EventEnvelope<T = unknown> {
   type: 'event';
   event: string;
   data: T;
+}
+
+/**
+ * One chat line. Broadcast to every client as a `chat_message` event and
+ * returned (as an array, oldest→newest) by `chat_history`. The author is the
+ * server-attributed wallet; clients render a truncated form.
+ */
+export interface ChatLine {
+  /** Monotonic-ish id (millis + counter) for client de-dupe / keys. */
+  id: string;
+  /** Author wallet (base58). Clients truncate for display. */
+  walletAddress: string;
+  /** Author's chat handle at send time, or null if they haven't set one. */
+  handle: string | null;
+  /** Sanitized, length-clamped message text. */
+  text: string;
+  /** Author's active asteroid at send time (or null). Small context tag. */
+  asteroidId: string | null;
+  /** Epoch millis the server accepted the message. */
+  sentAt: number;
 }
 
 /** Result of an issued nonce request. */

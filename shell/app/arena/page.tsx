@@ -11,6 +11,7 @@ import type { MeteorMode } from '@/components/arena/MeteorStrike';
 import { NavRail } from '@/components/arena/NavRail';
 import { ShareCardModal } from '@/components/arena/ShareCardModal';
 import { RESOURCE_LABEL, asResourceKind } from '@/components/arena/asteroid-orbits';
+import { ChatDock } from '@/components/chat/ChatDock';
 import {
   type AsteroidNetworkStats,
   type ConnectSnapshot,
@@ -732,7 +733,7 @@ function ConnectedArena({
   }, [stats, selectedId]);
 
   const resetHud = useCallback(() => {
-    clearHudLayout(['identity', 'network', 'navrail', 'action']);
+    clearHudLayout(['identity', 'network', 'navrail', 'action', 'chat']);
     setHudResetKey((k) => k + 1);
   }, []);
 
@@ -963,6 +964,25 @@ function ConnectedArena({
             storageId="network"
           >
             {renderNetwork()}
+          </DraggablePanel>
+        )}
+
+        {snap && (
+          <DraggablePanel
+            bumpKey={hudResetKey}
+            className="w-[300px]"
+            // Right edge, below the network-stats panel.
+            defaultPos={(vw) => ({ x: vw - 316, y: 160 })}
+            storageId="chat"
+          >
+            <div className="glass-panel flex h-[min(52vh,440px)] flex-col overflow-hidden">
+              <ChatDock
+                className="h-full"
+                selfHandle={snap.handle ?? null}
+                selfWallet={session.walletAddress}
+                session={session}
+              />
+            </div>
           </DraggablePanel>
         )}
 

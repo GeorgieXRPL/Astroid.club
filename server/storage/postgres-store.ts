@@ -27,6 +27,7 @@ import type {
   EscrowStore,
   EscrowWagerRecord,
   GameLogger,
+  HandleStore,
   HomeStationStore,
   RaidVaultStore,
   YieldLedger,
@@ -68,6 +69,8 @@ export class PostgresGameStore {
   readonly escrow: EscrowStore;
   /** Adapter to wire as the `CompWalletService`'s durable `store`. */
   readonly compWallets: CompWalletStore;
+  /** Adapter to wire as the `HandleService`'s durable `store`. */
+  readonly handles: HandleStore;
 
   private readonly client: PgClientLike;
   private readonly log: GameLogger;
@@ -117,6 +120,10 @@ export class PostgresGameStore {
       list: () => this.listCompWallets(),
       add: (wallet, note) => this.addCompWallet(wallet, note),
       remove: (wallet) => this.removeCompWallet(wallet),
+    };
+    this.handles = {
+      getAll: () => this.getAllHandles(),
+      set: (wallet, handle) => this.setHandle_(wallet, handle),
     };
   }
 
@@ -329,6 +336,31 @@ export class PostgresGameStore {
 
   private async removeCompWallet(walletAddress: string): Promise<void> {
     await this.client.query('DELETE FROM comp_wallets WHERE wallet = $1', [walletAddress]);
+  }
+
+  // --------- Chat handles ---------
+
+  private async getAllHandles(): Promise<Map<string, string>> {
+    try {
+      const { rows } = await this.client.query('SELECT wallet, handle FROM handles');
+      const out = new Map<string, string>();
+      for (const row of rows) out.set(row.wallet as string, row.handle as string);
+      return out;
+    } catch (err) {
+      this.log.error('[PostgresGameStore] failed to read handles:', err);
+      return new Map();
+    }
+  }
+
+  // Handle writes are awaited by the gateway (the player needs to know it
+  // persisted / whether the name was taken), so failures propagate. The
+  // unique index on lower(handle) is the DB-level backstop for uniqueness.
+  private async setHandle_(walletAddress: string, handle: string): Promise<void> {
+    await this.client.query(
+      `INSERT INTO handles (wallet, handle) VALUES ($1, $2)
+       ON CONFLICT (wallet) DO UPDATE SET handle = EXCLUDED.handle, updated_at = now()`,
+      [walletAddress, handle],
+    );
   }
 
   // --------- Lifecycle ---------

@@ -36,6 +36,7 @@ import type {
   EscrowStore,
   EscrowWagerRecord,
   GameLogger,
+  HandleStore,
   HomeStationStore,
   PendingYieldStore,
   RaidVaultStore,
@@ -81,6 +82,8 @@ export class RedisGameStore {
   readonly escrow: EscrowStore;
   /** Adapter to wire as the `CompWalletService`'s durable `store`. */
   readonly compWallets: CompWalletStore;
+  /** Adapter to wire as the `HandleService`'s durable `store`. */
+  readonly handles: HandleStore;
 
   private readonly client: RedisClientLike;
   private readonly log: GameLogger;
@@ -89,6 +92,7 @@ export class RedisGameStore {
   private readonly raidVaultKey: string;
   private readonly escrowKey: string;
   private readonly compWalletKey: string;
+  private readonly handleKey: string;
 
   constructor(config: RedisGameStoreConfig) {
     this.log = config.logger ?? console;
@@ -98,6 +102,7 @@ export class RedisGameStore {
     this.raidVaultKey = `${prefix}:raid-vault`;
     this.escrowKey = `${prefix}:escrow-wager`;
     this.compWalletKey = `${prefix}:comp-wallets`;
+    this.handleKey = `${prefix}:handles`;
 
     if (config.client) {
       this.client = config.client;
@@ -141,6 +146,10 @@ export class RedisGameStore {
       list: () => this.listCompWallets(),
       add: (wallet, note) => this.addCompWallet(wallet, note),
       remove: (wallet) => this.removeCompWallet(wallet),
+    };
+    this.handles = {
+      getAll: () => this.getAllHandles(),
+      set: (wallet, handle) => this.setHandle_(wallet, handle),
     };
   }
 
@@ -269,6 +278,25 @@ export class RedisGameStore {
 
   private async removeCompWallet(walletAddress: string): Promise<void> {
     await this.client.hdel(this.compWalletKey, walletAddress);
+  }
+
+  // --------- Chat handles ---------
+
+  private async getAllHandles(): Promise<Map<string, string>> {
+    try {
+      const raw = await this.client.hgetall(this.handleKey);
+      return new Map(Object.entries(raw));
+    } catch (err) {
+      this.log.error('[RedisGameStore] failed to read handles:', err);
+      return new Map();
+    }
+  }
+
+  // Awaited by the gateway so a persist failure surfaces to the player. Redis
+  // has no cross-field unique constraint; the HandleService enforces
+  // case-insensitive uniqueness in memory before this write.
+  private async setHandle_(walletAddress: string, handle: string): Promise<void> {
+    await this.client.hset(this.handleKey, walletAddress, handle);
   }
 
   // --------- Lifecycle ---------
