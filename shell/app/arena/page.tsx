@@ -920,20 +920,19 @@ function ConnectedArena({
         />
       </div>
 
-      {/* ───────────────── Mobile HUD (flow layout, no dragging) ───────────────── */}
+      {/* ───────────── Mobile HUD (single scroll column, no dragging) ─────────────
+          Everything lives in one scrollable stack so nothing gets clipped below
+          the fold — the old fixed top row hid the bottom of a tall identity
+          panel. Sub-boxes collapse (see HudBox) and belt chat is inline. */}
       <div className="pointer-events-none absolute inset-0 z-10 flex flex-col sm:hidden">
-        <div className="flex items-start justify-between gap-2 p-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-3">
+          {renderMeteorToast()}
+          {renderRaidFeed()}
           {renderIdentity()}
           {renderNetwork()}
-        </div>
-        {incomingMeteor && <div className="pointer-events-none px-4 pb-2">{renderMeteorToast()}</div>}
-        {raidFeed.length > 0 && (
-          <div className="pointer-events-none px-4">
-            <div className="mx-auto max-w-md">{renderRaidFeed()}</div>
-          </div>
-        )}
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-3">
+          <MobileChatSection session={session} snapshot={snap} />
           {renderActionArea()}
+          <div aria-hidden className="h-2 shrink-0" />
         </div>
       </div>
 
@@ -1055,6 +1054,114 @@ function ConnectedArena({
 /*  HUD pieces                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Collapsible sub-section used inside HUD panels. The header is a tap target
+ * (great on mobile) that toggles the body; an optional `summary` stays visible
+ * in the header when collapsed so a folded box still shows its headline value.
+ * Open/closed state persists per `storageId` so a player's layout sticks.
+ */
+function HudBox({
+  title,
+  storageId,
+  defaultOpen = true,
+  summary,
+  children,
+}: {
+  title: string;
+  storageId?: string;
+  defaultOpen?: boolean;
+  summary?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => {
+    if (!storageId || typeof window === 'undefined') return;
+    try {
+      const v = localStorage.getItem(`arena.box.${storageId}`);
+      if (v === '0') setOpen(false);
+      else if (v === '1') setOpen(true);
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [storageId]);
+  const toggle = () =>
+    setOpen((v) => {
+      const next = !v;
+      if (storageId) {
+        try {
+          localStorage.setItem(`arena.box.${storageId}`, next ? '1' : '0');
+        } catch {
+          /* ignore */
+        }
+      }
+      return next;
+    });
+  return (
+    <div className="mt-2 rounded-md border border-white/10 bg-white/[0.03]">
+      <button
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition hover:bg-white/[0.03]"
+        onClick={toggle}
+        type="button"
+      >
+        <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
+          {title}
+        </span>
+        <span className="flex items-center gap-2">
+          {!open && summary}
+          <span className="font-mono text-[11px] leading-none text-white/40">
+            {open ? '▴' : '▾'}
+          </span>
+        </span>
+      </button>
+      {open && <div className="px-3 pb-2.5">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * Mobile-only inline belt chat. A compact tap-to-open bar that expands into the
+ * shared {@link ChatDock} (its own header carries the close control). Keeps chat
+ * reachable in the arena on phones, where the floating popup is suppressed.
+ */
+function MobileChatSection({
+  session,
+  snapshot,
+}: {
+  session: Session;
+  snapshot: ConnectSnapshot | null;
+}) {
+  const [open, setOpen] = useState(false);
+  if (open) {
+    return (
+      <div className="glass-panel flex h-[min(55vh,360px)] flex-col overflow-hidden">
+        <ChatDock
+          className="h-full"
+          onClose={() => setOpen(false)}
+          selfHandle={snapshot?.handle ?? null}
+          selfWallet={session.walletAddress}
+          session={session}
+        />
+      </div>
+    );
+  }
+  return (
+    <button
+      className="glass-panel pointer-events-auto flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:border-cosmos/40"
+      onClick={() => setOpen(true)}
+      type="button"
+    >
+      <span className="flex items-center gap-2">
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">
+          Belt chat
+        </span>
+      </span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-cosmos">Open ▾</span>
+    </button>
+  );
+}
+
 function IdentityPanel({
   snapshot,
   stats,
@@ -1095,11 +1202,6 @@ function IdentityPanel({
   walletMismatch: { session: string; signer: string } | null;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  // Default to collapsed on small screens to reclaim arena space; expand on
-  // wider viewports. Runs after mount so it doesn't desync SSR markup.
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.innerWidth < 640) setCollapsed(true);
-  }, []);
   if (!snapshot) return null;
   const canClaim = snapshot.pendingYield > 0;
   const claiming = busy === 'claim';
@@ -1110,7 +1212,7 @@ function IdentityPanel({
   const credits = snapshot.pendingYield;
   const maxWager = snapshot.homeStationAsteroidId ? snapshot.totalStake * 0.2 : 0;
   return (
-    <div className="pointer-events-auto glass-panel-bright w-[56vw] max-w-xs px-3 py-2.5 sm:w-auto sm:px-4 sm:py-3">
+    <div className="pointer-events-auto glass-panel-bright w-full px-3 py-2.5 sm:w-auto sm:max-w-xs sm:px-4 sm:py-3">
       <div className="mb-1 flex items-center gap-2">
         <span aria-hidden className="live-dot" />
         <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-300">
@@ -1172,14 +1274,18 @@ function IdentityPanel({
           (not locked to one rock) — it boosts your drill at whichever asteroid
           you mine. Surface the home base + active mine by name, with one-tap
           navigation back home, so it's always clear where you're based. */}
-      <div className="mt-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
-        <div className="mb-1 flex items-baseline justify-between">
-          <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
-            Drill stake · global
-          </span>
+      <HudBox
+        storageId="stake"
+        summary={
           <span className="font-mono text-sm font-semibold text-cosmos">
             {fmt(snapshot.totalStake)}
           </span>
+        }
+        title="Drill stake · global"
+      >
+        <div className="mb-1 flex items-baseline justify-between font-mono text-[10px]">
+          <span className="uppercase tracking-[0.14em] text-white/45">Total staked</span>
+          <span className="text-sm font-semibold text-cosmos">{fmt(snapshot.totalStake)}</span>
         </div>
         {snapshot.homeStationAsteroidId ? (
           <>
@@ -1217,7 +1323,7 @@ function IdentityPanel({
             drill wherever you mine.
           </p>
         )}
-      </div>
+      </HudBox>
       {snapshot.tier &&
         (snapshot.tier.nextTierName ? (
           <div className="mt-1 font-mono text-[10px] leading-relaxed text-white/55">
@@ -1239,10 +1345,15 @@ function IdentityPanel({
 
       {/* Mining-rewards accumulator: claimable now + lifetime earned /
           claimed, so a claim never erases the record of what was earned. */}
-      <div className="mt-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
-        <div className="mb-1 font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
-          Mining rewards
-        </div>
+      <HudBox
+        storageId="rewards"
+        summary={
+          <span className="font-mono text-sm font-semibold text-emerald-300">
+            {fmt(snapshot.pendingYield)}
+          </span>
+        }
+        title="Mining rewards"
+      >
         <div className="flex items-baseline justify-between">
           <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-300/80">
             Claimable
@@ -1255,13 +1366,10 @@ function IdentityPanel({
           <span>Earned {fmt(snapshot.lifetimeEarned)}</span>
           <span>Claimed {fmt(snapshot.lifetimeRedeemed)}</span>
         </div>
-      </div>
+      </HudBox>
 
       {/* Spend balances: makes it explicit which pool each action draws from. */}
-      <div className="mt-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
-        <div className="mb-1 font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
-          Spend balances
-        </div>
+      <HudBox defaultOpen={false} storageId="spend" title="Spend balances">
         <div className="flex items-baseline justify-between font-mono text-[10px]">
           <span className="uppercase tracking-[0.14em] text-cosmos/80">Credits · deflect</span>
           <span className="font-semibold text-cosmos">{fmt(credits)}</span>
@@ -1275,7 +1383,7 @@ function IdentityPanel({
           $ASTROID from your connected wallet. A win returns your wager; a loss burns 40%,
           recirculates 40% to other asteroids&rsquo; vaults, and pays 20% to the defenders.
         </div>
-      </div>
+      </HudBox>
 
       {/* Stake $ASTROID — consolidated here (was at the bottom action panel). */}
       <div className="mt-2 flex items-end gap-2">
@@ -1369,8 +1477,8 @@ function NetworkStatsHud({ stats }: { stats: NetworkStatsSnapshot }) {
     if (typeof window !== 'undefined' && window.innerWidth < 640) setCollapsed(true);
   }, []);
   return (
-    <div className="pointer-events-auto glass-panel w-[30vw] max-w-[10rem] px-2.5 py-2 text-right sm:w-auto sm:max-w-xs sm:px-4 sm:py-3">
-      <div className="mb-1.5 flex items-center justify-end gap-2 sm:mb-2">
+    <div className="pointer-events-auto glass-panel w-full px-3 py-2 text-left sm:w-auto sm:max-w-xs sm:px-4 sm:py-3 sm:text-right">
+      <div className="mb-1.5 flex items-center justify-between gap-2 sm:mb-2 sm:justify-end">
         <p className="telemetry-label">Network</p>
         <button
           aria-expanded={!collapsed}

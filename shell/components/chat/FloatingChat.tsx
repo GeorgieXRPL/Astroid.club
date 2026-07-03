@@ -8,8 +8,9 @@
  * session singleton (`useSession`), so once a holder has connected (landing or
  * arena flow) chat follows them across every marketing/docs page.
  *
- * Hidden on `/arena`, where chat is a dedicated draggable HUD panel instead —
- * avoids doubling up (and colliding with the arena's own bottom-right controls).
+ * Hidden on `/arena`, where chat lives in the HUD instead — a dedicated
+ * draggable panel on desktop and an inline collapsible section on mobile —
+ * avoiding a doubled-up bubble that collides with the arena's own controls.
  */
 
 import Link from 'next/link';
@@ -44,15 +45,14 @@ export function FloatingChat() {
     if (open) setUnread(0);
   }, [open]);
 
-  // On the arena, desktop hosts chat in a dedicated draggable HUD panel, so the
-  // floating copy is suppressed there (`sm:hidden`) to avoid doubling up and
-  // colliding with the arena's own bottom-right controls. Mobile arena has no
-  // room for the panel, so the floating bubble stays available there.
+  // On the arena, chat lives in the HUD (draggable panel on desktop, inline
+  // collapsible section on mobile), so the floating copy is suppressed entirely
+  // to avoid a doubled-up bubble colliding with the arena's own controls.
   const onArena = pathname?.startsWith('/arena');
 
   return (
     <div
-      className={`pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6 ${onArena ? 'sm:hidden' : ''}`}
+      className={`pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6 ${onArena ? 'hidden' : ''}`}
     >
       {open && (
         <div className="glass-panel-bright pointer-events-auto flex h-[min(60vh,460px)] w-[min(92vw,360px)] flex-col overflow-hidden shadow-2xl">
