@@ -199,6 +199,14 @@ export interface HolderChainAdapterConfig {
    */
   requiredBalanceProvider?: () => number;
   /**
+   * Optional staked-balance provider (production: Quarry `getUserStakeInfo`).
+   * When supplied, the wallet's staked $ASTROID is ADDED to its liquid wallet
+   * balance for the gate, so a holder who staked their tokens into the game
+   * isn't locked out for having a low *liquid* balance. Best-effort: any error
+   * (or a missing provider) simply contributes 0 and the gate uses liquid only.
+   */
+  stakedBalanceProvider?: (walletAddress: string) => Promise<number>;
+  /**
    * Successful reads are cached for this many ms. Zero disables
    * caching. Default 30_000 (matches BG `CACHE_DURATION_MS`).
    */
@@ -228,6 +236,9 @@ export class HolderChainAdapter {
   private readonly tracker: HolderTracker;
   private readonly requiredBalance: number;
   private readonly requiredBalanceProvider: (() => number) | undefined;
+  private readonly stakedBalanceProvider:
+    | ((walletAddress: string) => Promise<number>)
+    | undefined;
   private readonly cacheTtlMs: number;
   private readonly estimator: HoldStartEstimator | undefined;
   private readonly now: () => number;
@@ -239,6 +250,7 @@ export class HolderChainAdapter {
     this.tracker = config.tracker;
     this.requiredBalance = config.requiredBalance;
     this.requiredBalanceProvider = config.requiredBalanceProvider;
+    this.stakedBalanceProvider = config.stakedBalanceProvider;
     this.cacheTtlMs = config.cacheTtlMs ?? 30_000;
     this.estimator = config.estimator;
     this.now = config.now ?? (() => Date.now());
@@ -279,7 +291,23 @@ export class HolderChainAdapter {
         return cached.balance;
       }
     }
-    const balance = await this.reader.getTokenBalance(walletAddress);
+    const liquid = await this.reader.getTokenBalance(walletAddress);
+    // Count staked $ASTROID toward holdings so a player who staked into the
+    // game isn't locked out of the gate for a low *liquid* wallet balance.
+    // Best-effort: any provider error contributes 0 (gate falls back to liquid).
+    let staked = 0;
+    if (this.stakedBalanceProvider) {
+      try {
+        const s = await this.stakedBalanceProvider(walletAddress);
+        if (Number.isFinite(s) && s > 0) staked = s;
+      } catch (err) {
+        this.log.warn(
+          `[HolderChain] staked-balance read failed for ${walletAddress.slice(0, 8)}...: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
+    const balance = liquid + staked;
     if (this.cacheTtlMs > 0) {
       this.cache.set(walletAddress, { balance, expiresAt: now + this.cacheTtlMs });
     }

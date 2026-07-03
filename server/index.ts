@@ -260,6 +260,16 @@ async function main(): Promise<void> {
               return solUsd > 0 && astroidUsd > 0 ? (holderMinSol * solUsd) / astroidUsd : 0;
             }
           : undefined,
+      // Add staked $ASTROID to the gated balance so players who staked their
+      // holdings into the game aren't locked out for a low liquid balance.
+      // `chainImpls.getStakeInfo` is assigned later (Quarry block); the closure
+      // reads it lazily and contributes 0 until/unless staking is wired.
+      stakedBalanceProvider: async (wallet) => {
+        const getInfo = chainImpls.getStakeInfo;
+        if (!getInfo) return 0;
+        const info = await getInfo(wallet);
+        return info?.stakedAmount ?? 0;
+      },
       logger: console,
     });
     chainImpls.getHolderBalance = (wallet) => holder.getHolderBalance(wallet);

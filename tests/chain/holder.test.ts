@@ -75,6 +75,8 @@ class FakeEstimator implements HoldStartEstimator {
 function makeAdapter(opts?: {
   balances?: Map<string, number | Error>;
   requiredBalance?: number;
+  requiredBalanceProvider?: () => number;
+  stakedBalanceProvider?: (walletAddress: string) => Promise<number>;
   cacheTtlMs?: number;
   minHoldMs?: number;
   minConsecutiveObservations?: number;
@@ -92,6 +94,10 @@ function makeAdapter(opts?: {
     reader,
     tracker,
     requiredBalance: opts?.requiredBalance ?? 100,
+    ...(opts?.requiredBalanceProvider && {
+      requiredBalanceProvider: opts.requiredBalanceProvider,
+    }),
+    ...(opts?.stakedBalanceProvider && { stakedBalanceProvider: opts.stakedBalanceProvider }),
     cacheTtlMs: opts?.cacheTtlMs ?? 30_000,
     estimator: opts?.estimator,
     logger: silentLogger,
@@ -153,6 +159,57 @@ describe('HolderChainAdapter.getHolderBalance: cache', () => {
     await adapter.getHolderBalance(ALICE);
     expect(reader.calls.length).toBe(3);
     expect(adapter.cacheSize()).toBe(0);
+  });
+});
+
+// =============================================================================
+// getHolderBalance: staked balance counts toward holdings
+// =============================================================================
+
+describe('HolderChainAdapter.getHolderBalance: staked balance', () => {
+  it('adds staked $ASTROID to the liquid wallet balance', async () => {
+    const { adapter } = makeAdapter({
+      balances: new Map([[ALICE, 7_684]]),
+      stakedBalanceProvider: async () => 21_350_000,
+    });
+    expect(await adapter.getHolderBalance(ALICE)).toBe(21_357_684);
+  });
+
+  it('a low-liquid but heavily-staked wallet qualifies for the gate', async () => {
+    // Mirrors the real lockout: liquid 7,684 < 1.75M required, but the wallet
+    // has staked 21.35M into the game — it should pass once staked counts.
+    const { adapter } = makeAdapter({
+      balances: new Map([[ALICE, 7_684]]),
+      requiredBalance: 1_755_314,
+      stakedBalanceProvider: async () => 21_350_000,
+      minHoldMs: 0,
+      minConsecutiveObservations: 1,
+    });
+    const result = await adapter.verifyHolderQualified(ALICE);
+    expect(result.qualified).toBe(true);
+  });
+
+  it('a provider error is swallowed and the gate falls back to liquid only', async () => {
+    const { adapter } = makeAdapter({
+      balances: new Map([[ALICE, 250]]),
+      stakedBalanceProvider: async () => {
+        throw new Error('quarry rpc down');
+      },
+    });
+    expect(await adapter.getHolderBalance(ALICE)).toBe(250);
+  });
+
+  it('a non-finite / negative staked value contributes 0', async () => {
+    const { adapter } = makeAdapter({
+      balances: new Map([[ALICE, 250]]),
+      stakedBalanceProvider: async () => Number.NaN,
+    });
+    expect(await adapter.getHolderBalance(ALICE)).toBe(250);
+  });
+
+  it('no provider wired → liquid balance only (unchanged behavior)', async () => {
+    const { adapter } = makeAdapter({ balances: new Map([[ALICE, 250]]) });
+    expect(await adapter.getHolderBalance(ALICE)).toBe(250);
   });
 
   it('reader errors propagate up (no silent fallback to stale cache)', async () => {
