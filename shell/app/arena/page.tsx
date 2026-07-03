@@ -1134,7 +1134,10 @@ function MobileChatSection({
   const [open, setOpen] = useState(false);
   if (open) {
     return (
-      <div className="glass-panel flex h-[min(55vh,360px)] flex-col overflow-hidden">
+      // pointer-events-auto is required: the mobile HUD column is
+      // pointer-events-none, so without opting back in taps pass through to the
+      // canvas and the chat input never focuses (no keyboard on mobile).
+      <div className="glass-panel pointer-events-auto flex h-[min(55vh,360px)] flex-col overflow-hidden">
         <ChatDock
           className="h-full"
           onClose={() => setOpen(false)}
