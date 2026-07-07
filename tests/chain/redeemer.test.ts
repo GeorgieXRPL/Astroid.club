@@ -198,6 +198,277 @@ describe('RedeemerService', () => {
   });
 });
 
+describe('RedeemerService ATA rent-offset (anti rent-harvest)', () => {
+  // Exploit under test: the treasury fronts ~0.002 SOL rent when it creates a
+  // recipient's token account, but Solana refunds a closed account's rent to
+  // the OWNER. A wallet looping claim → redeem → closeAccount harvested the
+  // treasury's SOL in production. The fix deducts the oracle-priced rent
+  // equivalent from the tokens delivered whenever we must create an ATA.
+  const RENT_LAMPORTS = 2_039_280; // mainnet rent-exempt minimum for 165 bytes
+  const BLOCKHASH = bs58.encode(Keypair.generate().publicKey.toBytes());
+
+  interface FakeAccount {
+    mint: PublicKey;
+    owner: PublicKey;
+    amount: bigint;
+  }
+
+  // The dependency tree carries two spl-token majors; TS resolves the import
+  // to the old 0.1.x types while runtime loads 0.4.x (same interop issue the
+  // server works around with createRequire). Re-assert the 0.4.x surface.
+  interface SplSurface {
+    TOKEN_PROGRAM_ID: PublicKey;
+    ACCOUNT_SIZE: number;
+    AccountLayout: {
+      encode(fields: Record<string, unknown>, buffer: Buffer): number;
+    };
+    getAssociatedTokenAddress(mint: PublicKey, owner: PublicKey): Promise<PublicKey>;
+  }
+
+  async function loadSpl(): Promise<SplSurface> {
+    return (await import('@solana/spl-token')) as unknown as SplSurface;
+  }
+
+  /** Encode a real SPL token account so spl-token's `getAccount` parses it. */
+  async function encodeTokenAccount(acc: FakeAccount): Promise<Buffer> {
+    const spl = await loadSpl();
+    const data = Buffer.alloc(spl.ACCOUNT_SIZE);
+    spl.AccountLayout.encode(
+      {
+        mint: acc.mint,
+        owner: acc.owner,
+        amount: acc.amount,
+        delegateOption: 0,
+        delegate: PublicKey.default,
+        state: 1,
+        isNativeOption: 0,
+        isNative: 0n,
+        delegatedAmount: 0n,
+        closeAuthorityOption: 0,
+        closeAuthority: PublicKey.default,
+      },
+      data,
+    );
+    return data;
+  }
+
+  /**
+   * Connection stub backed by a mutable map of token accounts. Also fakes the
+   * send path so `bridge()`'s `sendAndConfirmTransaction` resolves and we can
+   * inspect the transaction that would have been broadcast.
+   */
+  async function fakeChain(accounts: Map<string, FakeAccount>): Promise<{
+    conn: Connection;
+    sentTxs: Transaction[];
+  }> {
+    const spl = await loadSpl();
+    const sentTxs: Transaction[] = [];
+    const conn = {
+      getAccountInfo: vi.fn(async (address: PublicKey) => {
+        const acc = accounts.get(address.toBase58());
+        if (!acc) return null;
+        return {
+          owner: spl.TOKEN_PROGRAM_ID,
+          data: await encodeTokenAccount(acc),
+          lamports: RENT_LAMPORTS,
+          executable: false,
+        };
+      }),
+      getMinimumBalanceForRentExemption: vi.fn(async () => RENT_LAMPORTS),
+      getLatestBlockhash: vi.fn(async () => ({
+        blockhash: BLOCKHASH,
+        lastValidBlockHeight: 1000,
+      })),
+      sendTransaction: vi.fn(async (tx: Transaction) => {
+        sentTxs.push(tx);
+        return 'sig-bridge'.padEnd(64, '1');
+      }),
+      confirmTransaction: vi.fn(async () => ({ value: { err: null } })),
+    } as unknown as Connection;
+    return { conn, sentTxs };
+  }
+
+  /** Decode the u64 amount from an SPL Transfer instruction's data. */
+  function transferAmount(tx: Transaction): bigint {
+    const ix = tx.instructions[tx.instructions.length - 1]!;
+    expect(ix.data[0]).toBe(3); // SPL Token Transfer discriminator
+    return Buffer.from(ix.data).readBigUInt64LE(1);
+  }
+
+  // Oracle: SOL=$100, ASTROID=$0.001 → one ATA's rent (0.00203928 SOL) is
+  // worth exactly 203.928 tokens at redeemRate 1.
+  const oracle = { getPrice: () => 0.001, getSolPrice: () => 100 };
+  const EXPECTED_FEE = (RENT_LAMPORTS / 1e9) * (100 / 0.001); // 203.928
+
+  function makeService(
+    treasury: Keypair,
+    conn: Connection,
+    withOracle: boolean,
+  ): RedeemerService {
+    return new RedeemerService(
+      {
+        rpcUrl: 'http://127.0.0.1:8899',
+        iouMint: IOU_MINT,
+        iouDecimals: 9,
+        astroidMint: ASTROID_MINT,
+        astroidDecimals: 6,
+        treasury,
+        redeemRate: 1,
+        priorityMicroLamports: 5000,
+      },
+      {
+        connection: conn,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        getPriceOracle: withOracle ? () => oracle : () => undefined,
+      },
+    );
+  }
+
+  async function setupAccounts(opts: {
+    treasury: Keypair;
+    user: Keypair;
+    userHasIouAta?: boolean;
+    userHasAstroidAta?: boolean;
+    userIouBalance?: bigint;
+  }): Promise<Map<string, FakeAccount>> {
+    const spl = await loadSpl();
+    const iouMint = new PublicKey(IOU_MINT);
+    const astroidMint = new PublicKey(ASTROID_MINT);
+    const accounts = new Map<string, FakeAccount>();
+    const set = async (mint: PublicKey, owner: PublicKey, amount: bigint) => {
+      const ata = await spl.getAssociatedTokenAddress(mint, owner);
+      accounts.set(ata.toBase58(), { mint, owner, amount });
+    };
+    // Treasury holds plenty of both tokens.
+    await set(iouMint, opts.treasury.publicKey, 10_000_000_000_000n);
+    await set(astroidMint, opts.treasury.publicKey, 10_000_000_000_000n);
+    if (opts.userHasIouAta) {
+      await set(iouMint, opts.user.publicKey, opts.userIouBalance ?? 1_000_000_000_000n);
+    }
+    if (opts.userHasAstroidAta) {
+      await set(astroidMint, opts.user.publicKey, 0n);
+    }
+    return accounts;
+  }
+
+  it('bridge deducts the rent-equivalent in creds when it must create the ATA', async () => {
+    const treasury = Keypair.generate();
+    const user = Keypair.generate();
+    const accounts = await setupAccounts({ treasury, user, userHasIouAta: false });
+    const { conn, sentTxs } = await fakeChain(accounts);
+    const service = makeService(treasury, conn, true);
+
+    await service.bridge(user.publicKey.toBase58(), 500);
+
+    expect(sentTxs).toHaveLength(1);
+    const raw = transferAmount(sentTxs[0]!);
+    const expected = BigInt(Math.floor((500 - EXPECTED_FEE) * 1e9));
+    expect(raw).toBe(expected);
+  });
+
+  it('bridge transfers the full amount when the ATA already exists (no fee)', async () => {
+    const treasury = Keypair.generate();
+    const user = Keypair.generate();
+    const accounts = await setupAccounts({ treasury, user, userHasIouAta: true });
+    const { conn, sentTxs } = await fakeChain(accounts);
+    const service = makeService(treasury, conn, true);
+
+    await service.bridge(user.publicKey.toBase58(), 500);
+
+    expect(transferAmount(sentTxs[0]!)).toBe(500_000_000_000n);
+  });
+
+  it('bridge rejects a claim too small to cover the rent fee', async () => {
+    const treasury = Keypair.generate();
+    const user = Keypair.generate();
+    const accounts = await setupAccounts({ treasury, user, userHasIouAta: false });
+    const { conn } = await fakeChain(accounts);
+    const service = makeService(treasury, conn, true);
+
+    await expect(service.bridge(user.publicKey.toBase58(), 100)).rejects.toThrow(
+      /too small to cover/i,
+    );
+  });
+
+  it('bridge with the oracle down allows ONE free creation then refuses re-creation', async () => {
+    const treasury = Keypair.generate();
+    const user = Keypair.generate();
+    const accounts = await setupAccounts({ treasury, user, userHasIouAta: false });
+    const { conn, sentTxs } = await fakeChain(accounts);
+    const service = makeService(treasury, conn, false);
+
+    // First creation: free (legit new user), full amount delivered.
+    await service.bridge(user.publicKey.toBase58(), 500);
+    expect(transferAmount(sentTxs[0]!)).toBe(500_000_000_000n);
+
+    // The harvester closes the ATA (still absent in our map) and claims again:
+    // refused, because we already fronted rent for this wallet once.
+    await expect(service.bridge(user.publicKey.toBase58(), 500)).rejects.toThrow(
+      /closed after we funded it/i,
+    );
+  });
+
+  it('buildRedeemSwap deducts the rent-equivalent from the $ASTROID payout when creating the user ATA', async () => {
+    const treasury = Keypair.generate();
+    const user = Keypair.generate();
+    const accounts = await setupAccounts({
+      treasury,
+      user,
+      userHasIouAta: true,
+      userHasAstroidAta: false,
+    });
+    const { conn } = await fakeChain(accounts);
+    const service = makeService(treasury, conn, true);
+
+    const result = await service.buildRedeemSwap(user.publicKey.toBase58(), 500);
+    expect('transaction' in result).toBe(true);
+    if (!('transaction' in result)) return;
+
+    const tx = Transaction.from(Buffer.from(result.transaction, 'base64'));
+    // Last instruction is the treasury → user $ASTROID leg.
+    const raw = transferAmount(tx);
+    const expected = BigInt(Math.floor((500 - EXPECTED_FEE) * 1e6));
+    expect(raw).toBe(expected);
+  });
+
+  it('buildRedeemSwap pays the full amount when the user $ASTROID ATA exists', async () => {
+    const treasury = Keypair.generate();
+    const user = Keypair.generate();
+    const accounts = await setupAccounts({
+      treasury,
+      user,
+      userHasIouAta: true,
+      userHasAstroidAta: true,
+    });
+    const { conn } = await fakeChain(accounts);
+    const service = makeService(treasury, conn, true);
+
+    const result = await service.buildRedeemSwap(user.publicKey.toBase58(), 500);
+    expect('transaction' in result).toBe(true);
+    if (!('transaction' in result)) return;
+
+    const tx = Transaction.from(Buffer.from(result.transaction, 'base64'));
+    expect(transferAmount(tx)).toBe(500_000_000n);
+  });
+
+  it('buildRedeemSwap returns a BuildError (not a payout) when the amount cannot cover the fee', async () => {
+    const treasury = Keypair.generate();
+    const user = Keypair.generate();
+    const accounts = await setupAccounts({
+      treasury,
+      user,
+      userHasIouAta: true,
+      userHasAstroidAta: false,
+    });
+    const { conn } = await fakeChain(accounts);
+    const service = makeService(treasury, conn, true);
+
+    const result = await service.buildRedeemSwap(user.publicKey.toBase58(), 100);
+    expect('error' in result).toBe(true);
+    if ('error' in result) expect(result.error).toMatch(/too small to cover/i);
+  });
+});
+
 describe('RedeemerService.coSignAndSubmitRedeem (wallet-first co-sign gate)', () => {
   const BLOCKHASH = bs58.encode(Keypair.generate().publicKey.toBytes());
 
