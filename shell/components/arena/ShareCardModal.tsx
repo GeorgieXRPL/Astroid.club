@@ -3,12 +3,15 @@
 /**
  * Preview modal for a generated share card (roadmap §3.4). Shows the rendered
  * PNG and lets the player explicitly choose what to do with it — copy, download,
- * or open a pre-filled X post — instead of a surprise auto-download.
+ * or open a pre-filled X post — instead of a surprise auto-download. When the
+ * card `spec` is provided, the player can also restyle the card with their own
+ * background image (re-rendered client-side; nothing is uploaded anywhere).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { copyCard, downloadCard, openShareIntent } from '@/lib/share-card';
+import type { ShareCardSpec } from '@/lib/share-card';
+import { copyCard, downloadCard, openShareIntent, renderShareCard } from '@/lib/share-card';
 
 export interface ShareCardModalProps {
   blob: Blob;
@@ -17,6 +20,8 @@ export interface ShareCardModalProps {
   title: string;
   /** Phase-2 /share?… link X unfurls with the server-rendered card preview. */
   shareUrl?: string;
+  /** Card data; enables the custom-background restyle controls when present. */
+  spec?: ShareCardSpec;
   onClose: () => void;
 }
 
@@ -26,17 +31,52 @@ export function ShareCardModal({
   kind,
   title,
   shareUrl,
+  spec,
   onClose,
 }: ShareCardModalProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
+  // The blob currently previewed/exported: the classic render by default,
+  // swapped for a custom-background re-render when the player picks an image.
+  const [activeBlob, setActiveBlob] = useState(blob);
+  const [isCustom, setIsCustom] = useState(false);
+  const [restyling, setRestyling] = useState(false);
+  const [restyleError, setRestyleError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const objectUrl = URL.createObjectURL(blob);
-    setUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
+    setActiveBlob(blob);
+    setIsCustom(false);
   }, [blob]);
+
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(activeBlob);
+    setUrl(objectUrl);
+    setCopied(false);
+    setDownloaded(false);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [activeBlob]);
+
+  const onPickBackground = async (file: File | undefined) => {
+    if (!file || !spec) return;
+    setRestyling(true);
+    setRestyleError(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.readAsDataURL(file);
+      });
+      setActiveBlob(await renderShareCard(spec, { backgroundSrc: dataUrl }));
+      setIsCustom(true);
+    } catch {
+      setRestyleError('Could not use that image. Try a JPG or PNG.');
+    } finally {
+      setRestyling(false);
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -47,17 +87,17 @@ export function ShareCardModal({
   }, [onClose]);
 
   const onCopy = async () => {
-    const ok = await copyCard(blob);
+    const ok = await copyCard(activeBlob);
     setCopied(ok);
     if (!ok) {
       // Clipboard image write unsupported (e.g. Firefox/Safari) — fall back.
-      downloadCard(blob, kind);
+      downloadCard(activeBlob, kind);
       setDownloaded(true);
     }
   };
 
   const onDownload = () => {
-    downloadCard(blob, kind);
+    downloadCard(activeBlob, kind);
     setDownloaded(true);
   };
 
@@ -98,6 +138,54 @@ export function ShareCardModal({
               Rendering…
             </div>
           )}
+
+          {spec ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/40">
+                Card style
+              </span>
+              <button
+                className={`rounded-md border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] transition ${
+                  !isCustom
+                    ? 'border-cosmos/50 bg-cosmos/15 text-cosmos'
+                    : 'border-white/15 bg-white/[0.04] text-white/70 hover:bg-white/[0.08]'
+                }`}
+                onClick={() => {
+                  setActiveBlob(blob);
+                  setIsCustom(false);
+                  setRestyleError(null);
+                }}
+                type="button"
+              >
+                Classic
+              </button>
+              <button
+                className={`rounded-md border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] transition ${
+                  isCustom
+                    ? 'border-cosmos/50 bg-cosmos/15 text-cosmos'
+                    : 'border-white/15 bg-white/[0.04] text-white/70 hover:bg-white/[0.08]'
+                }`}
+                disabled={restyling}
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+              >
+                {restyling ? 'Rendering…' : isCustom ? 'Change image…' : 'Custom image…'}
+              </button>
+              <input
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  void onPickBackground(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+                ref={fileInputRef}
+                type="file"
+              />
+              {restyleError ? (
+                <span className="font-mono text-[10px] text-red-400">{restyleError}</span>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-4 grid grid-cols-3 gap-2">
             <button

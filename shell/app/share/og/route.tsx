@@ -11,7 +11,7 @@
 
 import { ImageResponse } from 'next/og';
 
-import { decodeShareParams } from '@/lib/share-card';
+import { decodeShareParams, formatGeneratedAt } from '@/lib/share-card';
 
 export const runtime = 'edge';
 
@@ -53,23 +53,37 @@ export async function GET(req: Request) {
             justifyContent: 'space-between',
           }}
         >
-          {/* Brand lockup */}
-          <div style={{ alignItems: 'center', display: 'flex' }}>
-            <div
-              style={{
-                background:
-                  'radial-gradient(circle at 35% 35%, #00d4ff 0%, #0353a4 55%, #001233 100%)',
-                borderRadius: '50%',
-                display: 'flex',
-                height: 30,
-                marginRight: 12,
-                width: 30,
-              }}
-            />
-            <div style={{ display: 'flex', fontSize: 30, fontWeight: 800, letterSpacing: 4 }}>
-              <span>ASTRO</span>
-              <span style={{ color: '#00d4ff' }}>ID</span>
+          {/* Brand lockup + generated timestamp */}
+          <div
+            style={{
+              alignItems: 'center',
+              display: 'flex',
+              justifyContent: 'space-between',
+              width: '100%',
+            }}
+          >
+            <div style={{ alignItems: 'center', display: 'flex' }}>
+              <div
+                style={{
+                  background:
+                    'radial-gradient(circle at 35% 35%, #00d4ff 0%, #0353a4 55%, #001233 100%)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  height: 30,
+                  marginRight: 12,
+                  width: 30,
+                }}
+              />
+              <div style={{ display: 'flex', fontSize: 30, fontWeight: 800, letterSpacing: 4 }}>
+                <span>ASTRO</span>
+                <span style={{ color: '#00d4ff' }}>ID</span>
+              </div>
             </div>
+            {spec.generatedAt ? (
+              <div style={{ color: 'rgba(255,255,255,0.45)', display: 'flex', fontSize: 19 }}>
+                {formatGeneratedAt(spec.generatedAt)}
+              </div>
+            ) : null}
           </div>
 
           {/* Headline + hero stat */}

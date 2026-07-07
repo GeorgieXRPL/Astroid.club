@@ -19,6 +19,7 @@ import {
   Session,
   SessionError,
 } from '@/lib/session';
+import type { ShareCardSpec } from '@/lib/share-card';
 import { encodeShareParams, minerCardSpec, raidCardSpec, renderShareCard } from '@/lib/share-card';
 import {
   canStake,
@@ -213,6 +214,7 @@ function ConnectedArena({
     kind: string;
     title: string;
     shareUrl: string;
+    spec: ShareCardSpec;
   } | null>(null);
   const [lastRaid, setLastRaid] = useState<{
     won: boolean;
@@ -636,7 +638,7 @@ function ConnectedArena({
           typeof window !== 'undefined'
             ? `${window.location.origin}/share?${encodeShareParams(spec)}`
             : 'https://astroid.club';
-        setShareModal({ blob, tweet, kind: spec.kind, title, shareUrl });
+        setShareModal({ blob, tweet, kind: spec.kind, title, shareUrl, spec });
       } catch {
         setNotice('Could not generate the card. Please try again.');
       } finally {
@@ -1042,6 +1044,7 @@ function ConnectedArena({
           kind={shareModal.kind}
           onClose={() => setShareModal(null)}
           shareUrl={shareModal.shareUrl}
+          spec={shareModal.spec}
           title={shareModal.title}
           tweet={shareModal.tweet}
         />
