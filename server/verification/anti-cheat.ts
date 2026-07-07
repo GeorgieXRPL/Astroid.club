@@ -486,6 +486,35 @@ export class AntiCheatService {
     };
   }
 
+  /**
+   * Flag a wallet for suspicious behavior observed OUTSIDE IP-based sybil
+   * detection (e.g. an economic-abuse pattern like rapid claim/close loops).
+   * Logs a CRITICAL SYBIL_FLAG row; idempotent for already-flagged wallets.
+   */
+  flagWallet(walletAddress: string, reason: string): void {
+    let tracker = this.walletTrackers.get(walletAddress);
+    if (!tracker) {
+      tracker = {
+        walletAddress,
+        ips: new Map(),
+        activeConnections: 0,
+        flagged: false,
+      };
+      this.walletTrackers.set(walletAddress, tracker);
+    }
+    if (tracker.flagged) return;
+    tracker.flagged = true;
+    tracker.flagReason = reason;
+    this.logSuspicious({
+      timestamp: Date.now(),
+      type: 'SYBIL_FLAG',
+      walletAddress,
+      ip: this.activeConnections.get(walletAddress) ?? 'unknown',
+      details: reason,
+      severity: 'CRITICAL',
+    });
+  }
+
   /** Manually unflag a wallet. Returns `true` when a flag was actually cleared. */
   unflagWallet(walletAddress: string): boolean {
     const tracker = this.walletTrackers.get(walletAddress);

@@ -208,6 +208,18 @@ export interface BridgeIouResult {
 }
 
 /**
+ * Result of `ensure_creds_ata`: either the wallet's Astroid Creds token
+ * account already exists, or an unsigned SELF-FUNDED creation transaction
+ * (the wallet pays its own ~0.002 SOL rent) to sign + submit before claiming.
+ */
+export type EnsureCredsAtaResult =
+  | { exists: true }
+  | ({ exists: false } & Pick<
+      StakeTxBuild,
+      'transaction' | 'message' | 'blockhash' | 'lastValidBlockHeight'
+    >);
+
+/**
  * A user's on-chain stake position. `lastStakeTime` is an ISO string
  * over the wire (the server sends a serialized `Date`).
  */
@@ -422,6 +434,15 @@ export class Session {
    */
   bridgeIou(amount: number, options: { timeoutMs?: number } = {}): Promise<BridgeIouResult> {
     return this.send<BridgeIouResult>({ type: 'bridge_iou', amount }, options);
+  }
+
+  /**
+   * Check whether this wallet has an Astroid Creds token account; when it
+   * doesn't, the reply carries an unsigned self-funded creation transaction
+   * (the wallet pays its own rent) to sign + submit before bridging a claim.
+   */
+  ensureCredsAta(options: { timeoutMs?: number } = {}): Promise<EnsureCredsAtaResult> {
+    return this.send<EnsureCredsAtaResult>({ type: 'ensure_creds_ata' }, options);
   }
 
   /**

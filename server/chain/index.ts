@@ -48,6 +48,7 @@ import type { AstroidRuntime } from '../config/runtime.js';
 import type { GameLogger } from '../game/interfaces.js';
 
 import type { HolderVerifyResult } from './holder.js';
+import type { EnsureAtaResult } from './redeemer.js';
 import type {
   BuildError,
   ClaimBuildResult,
@@ -55,6 +56,8 @@ import type {
   TransactionBuildResult,
   UserStakeInfo,
 } from './staking.js';
+
+export type { EnsureAtaResult } from './redeemer.js';
 
 // Re-export staking view types so consumers (gateway) can type the wire
 // envelopes without importing `staking.ts` directly — that module pulls
@@ -205,6 +208,13 @@ export interface ChainOpsImplementations {
    * first. Returns the transaction signature.
    */
   bridgeIou(walletAddress: string, amount: number): Promise<string>;
+  /**
+   * Check the wallet's Astroid Creds token account; when missing, build the
+   * SELF-FUNDED unsigned creation tx (wallet pays its own rent — the treasury
+   * must never front user-account rent, see the rent-harvest exploit notes in
+   * `redeemer.ts`).
+   */
+  buildEnsureCredsAta(walletAddress: string): Promise<EnsureAtaResult | BuildError>;
   getHolderBalance(walletAddress: string): Promise<number>;
   verifyHolderQualified(walletAddress: string): Promise<HolderVerifyResult>;
   getOnChainStake(walletAddress: string): Promise<{ amount: number; lastUpdate: number }>;
@@ -433,6 +443,19 @@ export class ChainOps {
     if (!impl) throw new ChainOpNotImplementedError('bridgeIou', 'chain_iou_bridge');
     const signature = await impl(walletAddress, amount);
     return { ok: true, disabled: false, signature };
+  }
+
+  /**
+   * Check/build the wallet's self-funded Astroid Creds account setup. Read +
+   * build only (no funds move); the wallet pays its own rent when it signs.
+   */
+  async buildEnsureCredsAta(
+    walletAddress: string,
+  ): Promise<ChainQueryResult<EnsureAtaResult | BuildError>> {
+    if (!this.chainEnabled) return disabled('buildEnsureCredsAta');
+    const impl = this.impls.buildEnsureCredsAta;
+    if (!impl) throw new ChainOpNotImplementedError('buildEnsureCredsAta', 'chain_iou_bridge');
+    return { ok: true, disabled: false, data: await impl(walletAddress) };
   }
 
   // -------- Holder verification --------

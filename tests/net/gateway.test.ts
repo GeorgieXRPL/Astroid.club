@@ -1127,6 +1127,74 @@ describe('AstroidGateway on-chain staking messages', () => {
     sock.close();
     await stopHarness(h);
   });
+
+  it('bridge_iou enforces the hourly claim cap and sybil-flags the looping wallet', async () => {
+    // Claim-loop abuse (the rent-harvest exploit signature): rapid repeated
+    // bridges. The 7th bridge inside an hour must be rejected BEFORE any
+    // debit/chain call, and the wallet must be flagged for operator review.
+    const chainOps = makeStakingChainOps({
+      bridgeIou: async () => 'sig-loop',
+    });
+    const h = await startHarness({ chainOps });
+    const { sock, wallet } = await authedSocket(h.port);
+    h.world.stakeManager.addPendingYield(wallet, 'home', 1000);
+
+    for (let i = 0; i < 6; i++) {
+      const ok = (await send(sock, {
+        type: 'bridge_iou',
+        amount: 10,
+        requestId: `cap${i}`,
+      })) as { type: string };
+      expect(ok.type).toBe('result');
+    }
+    const blocked = (await send(sock, {
+      type: 'bridge_iou',
+      amount: 10,
+      requestId: 'cap6',
+    })) as { type: string; code?: string; message?: string };
+    expect(blocked.type).toBe('error');
+    expect(blocked.code).toBe('rejected');
+    expect(blocked.message).toMatch(/too many claims/i);
+    // No debit happened for the blocked claim (6 × 10 spent, 940 left).
+    expect(h.world.stakeManager.getPendingYield(wallet)).toBe(940);
+    expect(h.world.antiCheat.isWalletFlagged(wallet)).toBe(true);
+    sock.close();
+    await stopHarness(h);
+  });
+
+  it('ensure_creds_ata forwards the exists/setup-tx result for the authed wallet', async () => {
+    const chainOps = makeStakingChainOps({
+      buildEnsureCredsAta: async () => ({ exists: true }),
+    });
+    const h = await startHarness({ chainOps });
+    const { sock } = await authedSocket(h.port);
+    const reply = (await send(sock, { type: 'ensure_creds_ata', requestId: 'ea1' })) as {
+      type: string;
+      data?: { exists: boolean };
+    };
+    expect(reply.type).toBe('result');
+    expect(reply.data?.exists).toBe(true);
+    sock.close();
+    await stopHarness(h);
+  });
+
+  it('ensure_creds_ata relays a BuildError as rejected', async () => {
+    const chainOps = makeStakingChainOps({
+      buildEnsureCredsAta: async () => ({ error: 'RPC exploded' }),
+    });
+    const h = await startHarness({ chainOps });
+    const { sock } = await authedSocket(h.port);
+    const reply = (await send(sock, { type: 'ensure_creds_ata', requestId: 'ea2' })) as {
+      type: string;
+      code?: string;
+      message?: string;
+    };
+    expect(reply.type).toBe('error');
+    expect(reply.code).toBe('rejected');
+    expect(reply.message).toMatch(/RPC exploded/);
+    sock.close();
+    await stopHarness(h);
+  });
 });
 
 describe('AstroidGateway wager-deposit messages', () => {

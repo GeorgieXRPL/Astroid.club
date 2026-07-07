@@ -343,14 +343,9 @@ async function main(): Promise<void> {
     // bridge reports `chain_disabled`.
     const redeemerConfig = getRedeemerConfigFromEnv();
     if (redeemerConfig) {
-      const redeemer = new RedeemerService(redeemerConfig, {
-        logger: console,
-        // Lazy: `priceOracle` is assigned later in this boot fn. Read when a
-        // bridge/redeem must front ATA rent, to price the rent-offset fee
-        // that stops close-and-reclaim rent harvesting.
-        getPriceOracle: () => priceOracle,
-      });
+      const redeemer = new RedeemerService(redeemerConfig, { logger: console });
       chainImpls.bridgeIou = (wallet, amount) => redeemer.bridge(wallet, amount);
+      chainImpls.buildEnsureCredsAta = (wallet) => redeemer.buildEnsureCredsAta(wallet);
       chainImpls.buildRedeemTx = (wallet, amount) => redeemer.buildRedeemSwap(wallet, amount);
       chainImpls.coSignAndSubmitRedeem = (wallet, args) =>
         redeemer.coSignAndSubmitRedeem(wallet, args);

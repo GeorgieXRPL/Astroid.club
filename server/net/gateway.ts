@@ -238,6 +238,14 @@ const WAGER_PENDING_TTL_MS = 180_000;
 const DEFAULT_MAX_PAYLOAD_BYTES = 64 * 1024;
 
 /** How many recent chat lines to retain + serve to new joiners. */
+/**
+ * Max bridges (claims to wallet) per wallet per hour. Rapid claim loops are
+ * the rent-harvest exploit signature (observed ~1/minute); honest players
+ * claim occasionally. Exceeding the cap sybil-flags the wallet. Override via
+ * BRIDGE_MAX_PER_HOUR.
+ */
+const BRIDGE_MAX_PER_HOUR = Math.max(1, Number(process.env.BRIDGE_MAX_PER_HOUR ?? '6'));
+
 const CHAT_HISTORY_MAX = 100;
 /** Chat rate limit: at most this many messages per {@link CHAT_WINDOW_MS}. */
 const CHAT_MAX_PER_WINDOW = 5;
@@ -291,6 +299,8 @@ export class AstroidGateway {
   private readonly chatHistory: ChatLine[] = [];
   /** Per-wallet chat send timestamps (epoch ms) for the chat-specific limiter. */
   private readonly chatTimestamps = new Map<string, number[]>();
+  /** Per-wallet bridge (claim) timestamps for the hourly claim-loop cap. */
+  private readonly bridgeTimestamps = new Map<string, number[]>();
   /** Monotonic counter to make chat line ids unique within a millisecond. */
   private chatSeq = 0;
 
@@ -612,6 +622,10 @@ export class AstroidGateway {
       }
       case 'bridge_iou': {
         await this.handleBridgeIou(conn, requestId, meta.walletAddress!, message.amount);
+        return;
+      }
+      case 'ensure_creds_ata': {
+        await this.handleEnsureCredsAta(conn, requestId, meta.walletAddress!);
         return;
       }
       case 'verify_stake_tx': {
@@ -1201,11 +1215,54 @@ export class AstroidGateway {
   }
 
   /**
+   * Check the wallet's Astroid Creds token account; when it's missing, reply
+   * with the unsigned SELF-FUNDED creation transaction (the wallet pays its
+   * own rent). The client signs + submits it and retries the claim. The
+   * treasury never fronts user-account rent — see the rent-harvest exploit
+   * notes in `redeemer.ts`.
+   */
+  private async handleEnsureCredsAta(
+    conn: Connection,
+    requestId: string | undefined,
+    wallet: string,
+  ): Promise<void> {
+    if (!this.chainOps) {
+      this.replyError(conn, requestId, 'chain_disabled', 'On-chain bridging is not enabled.');
+      return;
+    }
+    let result;
+    try {
+      result = await this.chainOps.buildEnsureCredsAta(wallet);
+    } catch (err) {
+      if (err instanceof ChainOpNotImplementedError) {
+        this.replyError(conn, requestId, 'chain_disabled', STAKING_UNAVAILABLE_MESSAGE);
+        return;
+      }
+      throw err;
+    }
+    if (result.disabled) {
+      this.replyError(conn, requestId, 'chain_disabled', result.message);
+      return;
+    }
+    if ('error' in result.data) {
+      this.replyError(conn, requestId, 'rejected', result.data.error);
+      return;
+    }
+    this.replyOk(conn, requestId, result.data);
+  }
+
+  /**
    * Bridge `amount` of a wallet's in-game IOU credits to on-chain
    * IOU-ASTROID. Debits the in-game ledger FIRST (synchronous + balance
    * checked, so concurrent requests can't double-spend), then runs the
    * server-signed treasury transfer. On any chain-side failure the credit
    * is refunded so the player never loses it without receiving the token.
+   *
+   * Also enforces a per-wallet hourly bridge cap: rapid claim loops are the
+   * signature of the rent-harvest exploit (claim → redeem → close → repeat,
+   * observed ~1/minute in production) and have no legitimate use — honest
+   * players claim occasionally. Exceeding the cap sybil-flags the wallet and
+   * rejects the bridge before any funds move.
    */
   private async handleBridgeIou(
     conn: Connection,
@@ -1217,6 +1274,26 @@ export class AstroidGateway {
       this.replyError(conn, requestId, 'chain_disabled', 'On-chain bridging is not enabled.');
       return;
     }
+    const now = Date.now();
+    const hourAgo = now - 60 * 60 * 1000;
+    const recent = (this.bridgeTimestamps.get(wallet) ?? []).filter((t) => t > hourAgo);
+    if (recent.length >= BRIDGE_MAX_PER_HOUR) {
+      this.world.antiCheat.flagWallet(
+        wallet,
+        `claim-loop: ${recent.length} bridges in the last hour (cap ${BRIDGE_MAX_PER_HOUR})`,
+      );
+      this.world.antiCheat.recordFailedAction(wallet, 'bridge_iou');
+      this.replyError(
+        conn,
+        requestId,
+        'rejected',
+        `Too many claims in the last hour (limit ${BRIDGE_MAX_PER_HOUR}). ` +
+          'Let your rewards accrue and claim again later.',
+      );
+      return;
+    }
+    recent.push(now);
+    this.bridgeTimestamps.set(wallet, recent);
     // Debit in-game credits up front. Reject (no chain call) if the wallet
     // lacks the balance.
     const debit = this.world.bridgeDebit(wallet, amount);

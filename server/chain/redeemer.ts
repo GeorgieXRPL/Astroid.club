@@ -88,16 +88,19 @@ function memoIx(memo: string, signer: PublicKey): TransactionInstruction {
 // --- Config --------------------------------------------------------------
 
 /**
- * Minimal price-oracle surface for the ATA-rent offset (USD spot prices).
- * Matches `PriceOracle` in `price-oracle.ts`.
+ * Result of {@link RedeemerService.buildEnsureCredsAta}: either the wallet's
+ * Astroid Creds token account already exists, or an unsigned SELF-FUNDED
+ * account-creation transaction (the wallet is fee payer AND rent payer) the
+ * client signs + submits before claiming.
+ *
+ * WHY the user pays their own rent: the treasury used to front the ~0.002 SOL
+ * rent when creating a recipient's token account, but Solana refunds a closed
+ * account's rent to the OWNER — so a wallet could claim → redeem → close →
+ * repeat, harvesting the treasury's SOL (this drained the treasury in
+ * production). With the user funding their own account, closing it merely
+ * refunds their own deposit; there is nothing to farm.
  */
-export interface RedeemerPriceOracleLike {
-  getPrice(): number;
-  getSolPrice(): number;
-}
-
-/** Token-account size (bytes) used to price ATA rent-exemption. */
-const TOKEN_ACCOUNT_SIZE = 165;
+export type EnsureAtaResult = { exists: true } | ({ exists: false } & TransactionBuildResult);
 
 /** Fully-resolved redeemer configuration. */
 export interface RedeemerConfig {
@@ -212,32 +215,14 @@ export class RedeemerService {
   private readonly iouMint: PublicKey;
   private readonly astroidMint: PublicKey;
   private readonly log: GameLogger;
-  private readonly getPriceOracle: () => RedeemerPriceOracleLike | undefined;
-  /** Cached rent-exempt minimum for a token account (lamports). */
-  private rentExemptLamports: number | null = null;
-  /**
-   * ATAs the treasury has already fronted rent for this process lifetime
-   * (`iou:<wallet>` / `astroid:<wallet>`). Backstop for the rent-offset fee:
-   * when the oracle has no prices we allow ONE free creation per wallet and
-   * refuse re-creation, so closing the account to harvest the rent deposit
-   * (a real exploit we've seen in the wild) can't loop.
-   */
-  private readonly rentFronted = new Set<string>();
-
   constructor(
     private readonly config: RedeemerConfig,
-    deps: {
-      connection?: Connection;
-      logger?: GameLogger;
-      /** Lazy accessor for the live price oracle (rent → token conversion). */
-      getPriceOracle?: () => RedeemerPriceOracleLike | undefined;
-    } = {},
+    deps: { connection?: Connection; logger?: GameLogger } = {},
   ) {
     this.connection = deps.connection ?? new Connection(config.rpcUrl, 'confirmed');
     this.iouMint = new PublicKey(config.iouMint);
     this.astroidMint = new PublicKey(config.astroidMint);
     this.log = deps.logger ?? console;
-    this.getPriceOracle = deps.getPriceOracle ?? (() => undefined);
   }
 
   /** The treasury wallet's public address (safe to log/expose). */
@@ -245,65 +230,46 @@ export class RedeemerService {
     return this.config.treasury.publicKey.toBase58();
   }
 
-  /** Cached rent-exempt lamports for a fresh token account. */
-  private async rentLamports(): Promise<number> {
-    if (this.rentExemptLamports == null) {
-      this.rentExemptLamports = await this.connection.getMinimumBalanceForRentExemption(
-        TOKEN_ACCOUNT_SIZE,
-      );
-    }
-    return this.rentExemptLamports;
-  }
-
   /**
-   * The oracle-priced token cost of one ATA's rent deposit, in UI units of
-   * $ASTROID (`redeemRateAdjusted=false`) or Astroid Creds (`true`, divides
-   * by the redeem rate since 1 cred pays out `redeemRate` $ASTROID). Returns
-   * 0 when the oracle has no prices yet.
-   *
-   * WHY: the treasury fronts ~0.002 SOL rent when it creates a recipient's
-   * token account, but Solana refunds a closed account's rent to the OWNER —
-   * so a wallet could claim → redeem → close → repeat, harvesting the
-   * treasury's SOL (this drained the treasury in production). Deducting the
-   * rent-equivalent from the tokens delivered makes each cycle a net loss
-   * for the harvester while costing a legitimate first-time user a one-off
-   * ~0.002 SOL worth of tokens.
+   * Check the wallet's Astroid Creds token account and, when it's missing,
+   * build the SELF-FUNDED unsigned creation transaction (wallet = fee payer =
+   * rent payer; the treasury signs nothing and spends nothing). The client
+   * signs + submits it, then retries the claim. See {@link EnsureAtaResult}
+   * for why the treasury must never front this rent.
    */
-  private async ataRentFeeTokens(inCreds: boolean): Promise<number> {
-    const oracle = this.getPriceOracle();
-    const astroidUsd = oracle?.getPrice() ?? 0;
-    const solUsd = oracle?.getSolPrice() ?? 0;
-    if (astroidUsd <= 0 || solUsd <= 0) return 0;
-    const rentSol = (await this.rentLamports()) / 1e9;
-    const astroidTokens = (rentSol * solUsd) / astroidUsd;
-    if (!inCreds) return astroidTokens;
-    const rate = this.config.redeemRate;
-    return rate > 0 ? astroidTokens / rate : astroidTokens;
-  }
-
-  /**
-   * Gate one treasury-funded ATA creation for `wallet`. Returns the fee (in
-   * UI units of the delivered token) to deduct from the delivery, or throws
-   * when the creation must be refused (oracle down AND we already fronted
-   * rent for this wallet once — the close-and-reclaim signature).
-   */
-  private async approveAtaCreation(wallet: string, kind: 'iou' | 'astroid'): Promise<number> {
-    const key = `${kind}:${wallet}`;
-    const fee = await this.ataRentFeeTokens(kind === 'iou');
-    if (fee <= 0) {
-      if (this.rentFronted.has(key)) {
-        throw new Error(
-          'Your token account was closed after we funded it. Re-creation is temporarily ' +
-            'unavailable — try again later or recreate the account from your own wallet.',
-        );
+  async buildEnsureCredsAta(walletAddress: string): Promise<EnsureAtaResult | BuildError> {
+    const splToken = loadSplToken();
+    try {
+      const owner = new PublicKey(walletAddress);
+      const ata = await splToken.getAssociatedTokenAddress(this.iouMint, owner);
+      if (await accountExists(this.connection, ata)) {
+        return { exists: true };
       }
-      this.log.warn?.(
-        `[redeemer] price oracle unavailable — fronting ATA rent for ${wallet.slice(0, 8)}… ` +
-          `(${kind}) without a rent-offset fee (one free creation per wallet).`,
-      );
+
+      const tx = new Transaction();
+      tx.add(memoIx(`astroid_creds_ata:${this.config.iouMint}`, owner));
+      tx.add(splToken.createAssociatedTokenAccountInstruction(owner, ata, owner, this.iouMint));
+
+      const { blockhash, lastValidBlockHeight } =
+        await this.connection.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = owner;
+
+      const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+      return {
+        exists: false,
+        transaction: serialized.toString('base64'),
+        message:
+          'One-time setup: create your Astroid Creds token account (~0.002 SOL rent, ' +
+          'paid by your wallet and refunded to you if you ever close the account).',
+        blockhash,
+        lastValidBlockHeight,
+      };
+    } catch (err) {
+      const message = sanitizeError(err);
+      this.log.error?.(`[redeemer] failed to build creds-ATA setup: ${message}`);
+      return { error: `Failed to build the account-setup transaction: ${message}` };
     }
-    this.rentFronted.add(key);
-    return fee;
   }
 
   /**
@@ -355,48 +321,32 @@ export class RedeemerService {
         }),
       );
 
-      // Rent-offset fee: when the treasury must create (and pay rent for) the
-      // recipient's Creds account, the rent-equivalent in creds is deducted
-      // from the delivery so close-and-reclaim harvesting can't profit.
-      let netIou = iouAmount;
+      // The recipient's Creds account must already exist — the treasury NEVER
+      // creates (i.e. pays rent for) user accounts. Solana refunds a closed
+      // account's rent to its OWNER, so treasury-funded creation was farmable
+      // by claim → redeem → close → repeat (a real exploit that drained the
+      // treasury's SOL). The client handles this by requesting a self-funded
+      // setup tx via `buildEnsureCredsAta` and retrying the claim.
       const userIouATA = await splToken.getAssociatedTokenAddress(this.iouMint, recipient);
-      const mustCreateAta = !(await accountExists(this.connection, userIouATA));
-      if (mustCreateAta) {
-        const fee = await this.approveAtaCreation(walletAddress, 'iou');
-        netIou = iouAmount - fee;
-        if (netIou <= 0) {
-          throw new Error(
-            `Claim amount (${iouAmount}) is too small to cover the one-off account-creation ` +
-              `rent fee (~${fee.toFixed(2)} creds). Claim a larger amount.`,
-          );
-        }
-        if (fee > 0) {
-          this.log.info?.(
-            `[redeemer] deducting ${fee.toFixed(4)} creds ATA-rent offset from ` +
-              `${walletAddress.slice(0, 8)}…'s bridge (${iouAmount} → ${netIou.toFixed(4)}).`,
-          );
-        }
-        tx.add(
-          splToken.createAssociatedTokenAccountInstruction(
-            treasury.publicKey,
-            userIouATA,
-            recipient,
-            this.iouMint,
-          ),
+      if (!(await accountExists(this.connection, userIouATA))) {
+        throw new Error(
+          'Your wallet needs a one-time Astroid Creds account setup before it can receive ' +
+            'a claim. Retry the claim and approve the setup transaction (~0.002 SOL, paid by ' +
+            'your wallet and refundable).',
         );
       }
 
-      const rawIou = toRawAmount(netIou, this.config.iouDecimals);
+      const rawIou = toRawAmount(iouAmount, this.config.iouDecimals);
       if (rawIou <= 0n) {
-        throw new Error(`Refusing to bridge a non-positive amount (${netIou}).`);
+        throw new Error(`Refusing to bridge a non-positive amount (${iouAmount}).`);
       }
       if (treasuryIou.amount < rawIou) {
         throw new Error(
-          `Insufficient IOU treasury balance (needs ${netIou} Astroid Creds). Top up the treasury.`,
+          `Insufficient IOU treasury balance (needs ${iouAmount} Astroid Creds). Top up the treasury.`,
         );
       }
 
-      tx.add(memoIx(`astroid_bridge:${netIou}:${this.config.iouMint}`, treasury.publicKey));
+      tx.add(memoIx(`astroid_bridge:${iouAmount}:${this.config.iouMint}`, treasury.publicKey));
       tx.add(
         splToken.createTransferInstruction(treasuryIouATA, userIouATA, treasury.publicKey, rawIou),
       );
@@ -406,7 +356,7 @@ export class RedeemerService {
         maxRetries: 3,
       });
       this.log.info?.(
-        `[redeemer] bridged ${netIou} Astroid Creds to ${walletAddress.slice(0, 8)}… ` +
+        `[redeemer] bridged ${iouAmount} Astroid Creds to ${walletAddress.slice(0, 8)}… ` +
           `| tx ${signature.slice(0, 8)}…`,
       );
       return signature;
@@ -437,7 +387,7 @@ export class RedeemerService {
       }
       const user = new PublicKey(walletAddress);
       const rawIou = toRawAmount(iouAmount, this.config.iouDecimals);
-      let astroidOut = iouAmount * this.config.redeemRate;
+      const astroidOut = iouAmount * this.config.redeemRate;
 
       const userIouATA = await splToken.getAssociatedTokenAddress(this.iouMint, user);
       const treasuryIouATA = await splToken.getAssociatedTokenAddress(
@@ -461,32 +411,10 @@ export class RedeemerService {
         return { error: `Insufficient Astroid Creds balance (need ${iouAmount}).` };
       }
 
-      // Rent-offset fee: when the treasury must create (and pay rent for) the
-      // user's $ASTROID account, the rent-equivalent in $ASTROID is deducted
-      // from the payout so close-and-reclaim harvesting can't profit.
       const mustCreateUserAstroidAta = !(await accountExists(this.connection, userAstroidATA));
-      if (mustCreateUserAstroidAta) {
-        let fee: number;
-        try {
-          fee = await this.approveAtaCreation(walletAddress, 'astroid');
-        } catch (gateErr) {
-          return { error: gateErr instanceof Error ? gateErr.message : 'ATA creation refused.' };
-        }
-        astroidOut -= fee;
-        if (fee > 0) {
-          this.log.info?.(
-            `[redeemer] deducting ${fee.toFixed(4)} $ASTROID ATA-rent offset from ` +
-              `${walletAddress.slice(0, 8)}…'s redeem payout.`,
-          );
-        }
-      }
       const rawAstroid = toRawAmount(astroidOut, this.config.astroidDecimals);
       if (rawAstroid <= 0n) {
-        return {
-          error: mustCreateUserAstroidAta
-            ? 'Redeem amount is too small to cover the one-off account-creation rent fee. Redeem a larger amount.'
-            : 'Redeem amount is too small to pay out any $ASTROID.',
-        };
+        return { error: 'Redeem amount is too small to pay out any $ASTROID.' };
       }
 
       // The treasury must be able to cover the $ASTROID payout.
@@ -509,12 +437,14 @@ export class RedeemerService {
           ),
         );
       }
-      // Create the user's $ASTROID ATA if needed (treasury pays rent; the
-      // rent-offset fee above keeps that from being harvestable).
+      // Create the user's $ASTROID ATA if needed. The USER pays the rent —
+      // they are this transaction's fee payer and signer, and rent must never
+      // come from the treasury (a closed account refunds its rent to the
+      // owner, which made treasury-funded creation farmable).
       if (mustCreateUserAstroidAta) {
         tx.add(
           splToken.createAssociatedTokenAccountInstruction(
-            treasury.publicKey,
+            user,
             userAstroidATA,
             user,
             this.astroidMint,

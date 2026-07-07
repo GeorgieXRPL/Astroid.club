@@ -233,7 +233,8 @@ export async function runClaimToWallet(
   source: WalletSource,
   amount: number,
 ): Promise<ClaimResult> {
-  if (typeof source.signAndSendTransaction !== 'function') {
+  const signAndSend = source.signAndSendTransaction;
+  if (typeof signAndSend !== 'function') {
     throw new StakingUnavailableError(
       'This wallet cannot submit on-chain transactions. Connect a Solana wallet (or set NEXT_PUBLIC_SOLANA_RPC_URL in dev mode).',
     );
@@ -244,6 +245,52 @@ export async function runClaimToWallet(
   assertSignerMatchesSession(session, source);
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, amount, message: 'No claimable rewards.' };
+  }
+
+  // Step 0: the wallet must have an Astroid Creds token account, created and
+  // rent-funded by the WALLET ITSELF (one-time, ~0.002 SOL, refundable). The
+  // treasury never fronts this rent — treasury-funded creation was farmable
+  // by claiming, redeeming, closing the account to pocket the rent refund,
+  // and repeating. No in-game credits move in this step.
+  const ata = await session.ensureCredsAta();
+  if (!ata.exists) {
+    try {
+      await signAndSend({
+        transaction: ata.transaction,
+        blockhash: ata.blockhash,
+        lastValidBlockHeight: ata.lastValidBlockHeight,
+      });
+      // Wait until the gateway can SEE the new account (confirmed commitment)
+      // before bridging, otherwise the bridge's existence check races the
+      // wallet's broadcast and rejects a claim that's about to be fine.
+      const deadline = Date.now() + 45_000;
+      let visible = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2_500));
+        if ((await session.ensureCredsAta()).exists) {
+          visible = true;
+          break;
+        }
+      }
+      if (!visible) {
+        return {
+          ok: false,
+          amount,
+          message:
+            'Your Astroid Creds account setup was submitted but has not confirmed yet. ' +
+            'Nothing was moved — wait a few seconds and claim again.',
+        };
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        amount,
+        message:
+          `Claim needs a one-time account setup (~0.002 SOL, paid by your wallet, refundable) ` +
+          `that didn't complete: ${reason}. Nothing was moved — top up a little SOL if needed and try again.`,
+      };
+    }
   }
 
   // Step 1: bridge in-game credits → on-chain Astroid Creds (server-signed).

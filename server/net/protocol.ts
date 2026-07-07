@@ -170,6 +170,18 @@ export const BridgeIouMessage = z.object({
   amount: TokenAmountField,
 });
 
+/**
+ * Check the wallet's Astroid Creds token account; when missing, the reply
+ * carries an unsigned SELF-FUNDED creation tx (the wallet pays its own ~0.002
+ * SOL rent) to sign + submit before claiming. The treasury never fronts
+ * user-account rent — a closed account refunds rent to the OWNER, which made
+ * treasury-funded creation farmable (claim → redeem → close → repeat).
+ */
+export const EnsureCredsAtaMessage = z.object({
+  type: z.literal('ensure_creds_ata'),
+  requestId: RequestId,
+});
+
 export const VerifyStakeTxMessage = z.object({
   type: z.literal('verify_stake_tx'),
   requestId: RequestId,
@@ -353,6 +365,7 @@ export const GameMessage = z.discriminatedUnion('type', [
   BuildRedeemTxMessage,
   SubmitRedeemSwapMessage,
   BridgeIouMessage,
+  EnsureCredsAtaMessage,
   VerifyStakeTxMessage,
   StakeInfoMessage,
   CredsBalanceMessage,
@@ -388,6 +401,7 @@ export const POST_AUTH_TYPES: ReadonlySet<GameMessageType> = new Set<GameMessage
   'build_redeem_tx',
   'submit_redeem_swap',
   'bridge_iou',
+  'ensure_creds_ata',
   'verify_stake_tx',
   'stake_info',
   'creds_balance',

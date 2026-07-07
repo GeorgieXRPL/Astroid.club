@@ -320,6 +320,20 @@ describe('AntiCheatService sybil flagging', () => {
     expect(svc.unflagWallet(ALICE)).toBe(false);
   });
 
+  it('flagWallet flags directly for behavioral abuse (e.g. claim loops), with a CRITICAL log', () => {
+    expect(svc.isWalletFlagged(ALICE)).toBe(false);
+    svc.flagWallet(ALICE, 'claim-loop: 7 bridges in the last hour (cap 6)');
+    expect(svc.isWalletFlagged(ALICE)).toBe(true);
+    expect(svc.getWalletSybilStatus(ALICE).reason).toMatch(/claim-loop/);
+    const logs = svc.getRecentSuspiciousActivity(100, 'CRITICAL');
+    expect(logs.some((l) => l.type === 'SYBIL_FLAG' && l.walletAddress === ALICE)).toBe(true);
+    // Idempotent: re-flagging doesn't clobber the original reason or double-log.
+    const before = svc.getRecentSuspiciousActivity().length;
+    svc.flagWallet(ALICE, 'another reason');
+    expect(svc.getRecentSuspiciousActivity().length).toBe(before);
+    expect(svc.getWalletSybilStatus(ALICE).reason).toMatch(/claim-loop/);
+  });
+
   it('getWalletSybilStatus returns empty status for unknown wallets', () => {
     const status = svc.getWalletSybilStatus('wallet_unknown_xxxxxxx');
     expect(status).toEqual({ flagged: false, uniqueIps: 0, ips: [] });
