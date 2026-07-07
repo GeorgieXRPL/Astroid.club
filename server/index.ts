@@ -393,6 +393,20 @@ async function main(): Promise<void> {
         betEscrowChain.payDefender(wallet, amount, raidId);
       chainImpls.burnBetEscrow = (amount, raidId) => betEscrowChain.burnWager(amount, raidId);
       betEscrowWired = true;
+      // Custody hygiene: a dedicated ESCROW_PRIVATE_KEY keeps player wager
+      // liability off the redeemer's $ASTROID float. Running the single-wallet
+      // fallback in production commingles funds — warn loudly so it's a
+      // conscious choice, not an accident. (Not a hard fail: an existing deploy
+      // must keep booting until the operator provisions + funds the new key.)
+      if (!process.env.ESCROW_PRIVATE_KEY) {
+        const commingleMsg =
+          '[astroid-club] SECURITY: raid-wager escrow is sharing the REDEEMER_TREASURY hot ' +
+          'wallet (no ESCROW_PRIVATE_KEY set). Escrowed wager liability is commingled with the ' +
+          'redeemer $ASTROID float — a settlement/redeem bug can drain funds backing live wagers. ' +
+          'Provision a dedicated escrow wallet and set ESCROW_PRIVATE_KEY in production.';
+        if (process.env.NODE_ENV === 'production') console.error(commingleMsg);
+        else console.warn(commingleMsg);
+      }
       const feeSummary = betEscrowChain.getFeeSummary();
       const split = getRaidLossSplit();
       console.info(
@@ -538,6 +552,12 @@ async function main(): Promise<void> {
   if (runtime.databaseUrl) {
     postgresStore = new PostgresGameStore({
       connectionString: runtime.databaseUrl,
+      // Opt-in strict TLS: DATABASE_SSL_STRICT=true verifies the server cert
+      // (against DATABASE_CA_CERT when provided, else the system trust store).
+      // Defaults off to preserve compatibility with providers whose certs
+      // don't chain to Node's bundled roots.
+      sslRejectUnauthorized: process.env.DATABASE_SSL_STRICT === 'true',
+      ...(process.env.DATABASE_CA_CERT && { caCert: process.env.DATABASE_CA_CERT }),
       logger: console,
     });
     homeStationStore = postgresStore.homeStation;

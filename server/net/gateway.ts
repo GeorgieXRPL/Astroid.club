@@ -144,6 +144,13 @@ export interface AstroidGatewayOptions {
   tickIntervalMs?: number;
   /** Heartbeat interval forwarded to `WSGateway`. */
   heartbeatMs?: number;
+  /**
+   * Max inbound WebSocket frame size in bytes. Frames larger than this are
+   * rejected by `ws` before parsing, capping the JSON-parse DoS surface. The
+   * largest legitimate message is a base64 signed transaction (~8 KB), so the
+   * default {@link DEFAULT_MAX_PAYLOAD_BYTES} leaves generous headroom.
+   */
+  maxPayloadBytes?: number;
   /** Optional injectable logger (defaults to `console`). */
   logger?: GameLogger;
   /** Optional override for `verifyWallet`'s `app` name. Default `astroid.club`. */
@@ -221,6 +228,14 @@ const REDEEM_PENDING_TTL_MS = 90_000;
  * confirm the deposit on-chain before submitting the signature back.
  */
 const WAGER_PENDING_TTL_MS = 180_000;
+
+/**
+ * Default cap on inbound WebSocket frame size (64 KiB). Without an explicit
+ * `maxPayload`, `ws` allows up to 100 MB per frame — a cheap memory-pressure
+ * DoS. The largest legitimate client message is a base64 signed transaction
+ * capped at 8192 chars in the protocol, so 64 KiB is comfortable headroom.
+ */
+const DEFAULT_MAX_PAYLOAD_BYTES = 64 * 1024;
 
 /** How many recent chat lines to retain + serve to new joiners. */
 const CHAT_HISTORY_MAX = 100;
@@ -314,6 +329,9 @@ export class AstroidGateway {
       ...(options.host && { host: options.host }),
       ...(options.rateLimit && { rateLimit: options.rateLimit }),
       ...(options.heartbeatMs !== undefined && { heartbeatMs: options.heartbeatMs }),
+      // Cap inbound frame size so an oversized payload can't force a huge JSON
+      // parse before rejection (defense-in-depth alongside the rate limiter).
+      ws: { maxPayload: options.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES },
     };
     this.underlying = new WSGateway(gatewayOptions);
 

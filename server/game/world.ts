@@ -697,15 +697,29 @@ export class GameWorld {
     const resolved = this.discoveryEngine.tick(deltaMs, states);
     const discovered = new Set<string>();
     for (const discovery of resolved) {
-      this.yieldOrchestrator.processDiscovery({
+      const discoveryNumber =
+        (this.registry.getAsteroid(discovery.asteroidId)?.totalDiscoveries ?? 0) + 1;
+      const outcome = this.yieldOrchestrator.processDiscovery({
         asteroidId: discovery.asteroidId,
         finderWallet: discovery.finderWallet,
-        discoveryNumber:
-          (this.registry.getAsteroid(discovery.asteroidId)?.totalDiscoveries ?? 0) + 1,
+        discoveryNumber,
         shares: discovery.shares,
       });
       this.registry.recordDiscoveryFound(discovery.asteroidId, '');
       discovered.add(discovery.asteroidId);
+      // Server-push so clients can play a reward cue and float the yield gained
+      // without polling. Cheap and additive — the state already exists here.
+      this.emit('discovery_found', {
+        asteroidId: discovery.asteroidId,
+        asteroidName:
+          this.registry.getAsteroid(discovery.asteroidId)?.definition.name ?? discovery.asteroidId,
+        finderWallet: discovery.finderWallet,
+        discoveryNumber,
+        totalYield: Math.round(outcome.totalYield),
+        finderYield: Math.round(outcome.finderYield),
+        minerCount: outcome.minerPayouts.length,
+        foundAt: nowMs,
+      });
     }
     return [...discovered];
   }

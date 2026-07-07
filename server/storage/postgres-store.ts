@@ -49,10 +49,22 @@ export interface PostgresGameStoreConfig {
   client?: PgClientLike;
   /**
    * TLS toggle. Managed Postgres (Supabase/Neon) requires SSL; we default
-   * to enabled with `rejectUnauthorized: false` (their certs chain to
-   * roots Node doesn't bundle). Set `false` for a local non-TLS DB.
+   * to enabled. Set `false` for a local non-TLS DB.
    */
   ssl?: boolean;
+  /**
+   * Verify the server certificate against a trusted CA. Off by default for
+   * backward compatibility (managed providers often chain to roots Node
+   * doesn't bundle, so verification would fail closed). Set `true` in
+   * production and pass {@link caCert} — or rely on the system trust store —
+   * so the connection is protected against MITM on `DATABASE_URL`.
+   */
+  sslRejectUnauthorized?: boolean;
+  /**
+   * PEM-encoded CA certificate (or bundle) used to verify the DB server when
+   * {@link sslRejectUnauthorized} is true. Supply your provider's CA bundle.
+   */
+  caCert?: string;
   /** Extra pg pool options merged in. */
   poolConfig?: PoolConfig;
   logger?: GameLogger;
@@ -82,9 +94,26 @@ export class PostgresGameStore {
       this.client = config.client;
     } else if (config.connectionString) {
       const ssl = config.ssl ?? true;
+      const rejectUnauthorized = config.sslRejectUnauthorized ?? false;
+      // Build the TLS options: when verification is on, optionally pin a CA
+      // bundle; when off (default), keep the permissive behavior managed
+      // providers need but warn so it's a conscious production choice.
+      const sslOptions = ssl
+        ? {
+            rejectUnauthorized,
+            ...(rejectUnauthorized && config.caCert ? { ca: config.caCert } : {}),
+          }
+        : undefined;
+      if (ssl && !rejectUnauthorized) {
+        this.log.warn(
+          '[PostgresGameStore] TLS certificate verification is DISABLED ' +
+            '(rejectUnauthorized: false). Set DATABASE_SSL_STRICT=true (and DATABASE_CA_CERT ' +
+            'if your provider needs a CA bundle) to protect DATABASE_URL against MITM.',
+        );
+      }
       const pool = new Pool({
         connectionString: config.connectionString,
-        ...(ssl ? { ssl: { rejectUnauthorized: false } } : {}),
+        ...(sslOptions ? { ssl: sslOptions } : {}),
         ...config.poolConfig,
       });
       pool.on('error', (err: Error) => {

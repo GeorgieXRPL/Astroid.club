@@ -572,6 +572,31 @@ describe('GameWorld discovery sweep (mining trigger)', () => {
     expect(w.getNetworkStats().totalDiscoveries).toBe(1);
   });
 
+  it('broadcasts discovery_found when a discovery resolves', async () => {
+    const w = discoveryWorld();
+    const events: Array<{ event: string; data: unknown }> = [];
+    w.setBroadcaster((event, data) => events.push({ event, data }));
+    await w.connectPlayer(ALICE);
+    w.joinAsteroid(ALICE, 'home');
+    w.reportDrillPower(ALICE, 10);
+
+    const t0 = 1_000_000;
+    w.runDiscoverySweep(t0);
+    w.runDiscoverySweep(t0 + 60_000);
+
+    const found = events.filter((e) => e.event === 'discovery_found');
+    expect(found).toHaveLength(1);
+    expect(found[0]?.data).toMatchObject({
+      asteroidId: 'home',
+      finderWallet: ALICE,
+      discoveryNumber: 1,
+      totalYield: 100,
+      finderYield: 96,
+      minerCount: 1,
+      foundAt: t0 + 60_000,
+    });
+  });
+
   it('does not pay the in-game ledger when payouts route on-chain', async () => {
     const onYieldPayout = vi.fn();
     const w = discoveryWorld(true, onYieldPayout);
